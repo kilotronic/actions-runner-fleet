@@ -32,8 +32,8 @@ HostConfig = namedtuple(
 
 CONTAINER_RUNTIMES = frozenset({"orbstack"})
 
-# Host-table keys that are not owner/repo counts. Unimplemented keys are
-# popped so an older private inventory (e.g. ollama_serve) still loads.
+# Host-table keys that are not owner/repo counts. ollama_serve is owned by
+# ollama_serve.py, not by apply.py, so it is popped here.
 _HOST_RESERVED = (
     "ci_slots",
     "e2e_workers",
