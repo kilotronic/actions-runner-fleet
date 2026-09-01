@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: "."
+          severity: warning
+
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up venv
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet pytest 'ruff==0.16.1'
+      - name: Run ruff
+        run: .venv/bin/ruff check .
+      - name: Run pytest
+        run: .venv/bin/pytest tests/ -q
+
+  validate:
+    name: Validate scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check scripts are executable
+        run: |
+          status=0
+          for f in install.sh uninstall.sh install-linux.sh uninstall-linux.sh update-host.sh; do
+            if [ ! -x "$f" ]; then
+              echo "ERROR: $f is not executable"
+              status=1
+            fi
+          done
+          exit $status
+      - name: Syntax check (bash -n)
+        run: |
+          for f in install.sh uninstall.sh install-linux.sh uninstall-linux.sh update-host.sh hooks/*.sh; do
+            bash -n "$f" || exit 1
+          done
+      - name: OrbStack ensure sandbox
+        run: ./test-ensure-orbstack.sh

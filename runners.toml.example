@@ -1,0 +1,21 @@
+# Fleet inventory — copy to ~/.config/actions-runner/runners.toml
+# (or set ACTIONS_RUNNER_CONFIG). This file is an example; keep the real
+# inventory out of this repo.
+
+[fleet]
+# Trailing repo names whose runner *count* is capped at the host's ci_slots.
+# The in-job admission lock (if you have one) is separate.
+slot_gated_repos = ["app"]
+
+# Host key is `hostname -s` (override with APPLY_HOST).
+[hosts.ci-mac]
+labels = ["bigmem"]
+ci_slots = 2
+e2e_workers = 2
+container_runtime = "orbstack"  # opt-in: job-started hook + 5-min watchdog
+"acme/app" = 2
+"acme/docs" = 1
+
+[hosts.ci-linux]
+ci_slots = 2
+"acme/app" = 2
