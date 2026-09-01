@@ -31,6 +31,11 @@ container_runtime = "orbstack"  # opt-in host-lifetime OrbStack ensure
 "acme/app" = 2
 ```
 
+`ollama_serve = true` on a host publishes that box's local ollama
+(127.0.0.1:11434) to the tailnet via `tailscale serve`. Dropping the key tears
+the forwarder down. ollama's API is unauthenticated; restrict who can connect
+with a tailnet ACL.
+
 ## Tools
 
 | Tool                              | What it does                                                                 |
@@ -40,6 +45,7 @@ container_runtime = "orbstack"  # opt-in host-lifetime OrbStack ensure
 | `maintenance-timer.py`            | Every 2h: `update-host.sh` so idle hosts still self-heal                     |
 | `runner_timers.py`                | Shared launchd / systemd `--user` installer                                  |
 | `orbstack-watchdog.py`            | Installed only when `container_runtime = "orbstack"`                         |
+| `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off  |
 | `hooks/ensure-orbstack.sh`        | Four-state OrbStack recovery (healthy / down / slow / wedged)                |
 | `install.sh` / `install-linux.sh` | Register runners, install load + maintenance timers                          |
 

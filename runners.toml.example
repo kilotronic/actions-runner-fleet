@@ -18,4 +18,5 @@ container_runtime = "orbstack"  # opt-in: job-started hook + 5-min watchdog
 
 [hosts.ci-linux]
 ci_slots = 2
+ollama_serve = true  # opt-in: publish local ollama to the tailnet via tailscale serve
 "acme/app" = 2

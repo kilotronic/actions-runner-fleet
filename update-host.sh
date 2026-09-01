@@ -168,6 +168,13 @@ esac
     fi
   fi
 
+  # Converge this host's tailnet exposure of ollama to ollama_serve in
+  # runners.toml. Quiet when in sync. Fail-closed: a failure leaves the
+  # endpoint missing, never over-exposed.
+  if [[ -n "$PY" && -f ./ollama_serve.py ]]; then
+    "$PY" ./ollama_serve.py || true
+  fi
+
   # Converge runner inventory to runners.toml.
   if [[ -n "$PY" && -f ./apply.py ]]; then
     "$PY" ./apply.py || true
