@@ -108,13 +108,16 @@ if [[ -n "$PY" && -f ./apply.py ]]; then
 fi
 case "$(uname -s)" in
   Linux)
-    # polkit rule letting the runner user take block:sleep/idle inhibitors —
-    # the Linux hooks' systemd-inhibit calls are denied to non-session
-    # processes without it (silently no-op, and the box can idle-suspend
-    # mid-job). sudo -n: fleet boxes run passwordless sudo for jason; if a
-    # box doesn't, warn rather than hang a hook-triggered update. This is
-    # privileged host state (not runner config), so it stays here rather
-    # than moving into apply.py.
+    # OPTIONAL, operator-supplied: a polkit rule letting the runner user take
+    # block:sleep inhibitors. Most current distributions already permit this for
+    # any local user — measured on Debian 13, where the hook's inhibitor is
+    # granted with no rule installed — so this kit deliberately does NOT ship
+    # one: a privileged policy file that is unnecessary almost everywhere is not
+    # a good default. Drop your own at the path below if a host's polkit denies
+    # the inhibitor (the hook logs a warning when that happens); a missing file
+    # is a silent no-op. sudo -n: hosts that do not grant passwordless sudo warn
+    # rather than hang a hook-triggered update. Privileged host state, not
+    # runner config, so it stays here rather than moving into apply.py.
     POLKIT_RULE=polkit/49-actions-runner-inhibit.rules
     POLKIT_DEST=/etc/polkit-1/rules.d/49-actions-runner-inhibit.rules
     if [[ -f "$POLKIT_RULE" ]] && ! cmp -s "$POLKIT_RULE" "$POLKIT_DEST" 2>/dev/null; then
