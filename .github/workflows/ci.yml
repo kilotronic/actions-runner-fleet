@@ -54,3 +54,5 @@ jobs:
           done
       - name: OrbStack ensure sandbox
         run: ./test-ensure-orbstack.sh
+      - name: Job-started hook sandbox
+        run: ./test-job-started-hook.sh
