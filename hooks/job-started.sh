@@ -2,17 +2,23 @@
 # Job-started hook: runs before each job on the self-hosted runner.
 # Set via ACTIONS_RUNNER_HOOK_JOB_STARTED in the runner's .env file.
 #
-# Two host concerns, both of which a workflow step is too late to handle:
+# Three host concerns, none of which a workflow step can handle:
 #
-# 1. Hold a sleep inhibitor for the lifetime of the job, so an idle-suspend
+# 1. Sample the host environment before the job starts (see SIDECARS below).
+# 2. Hold a sleep inhibitor for the lifetime of the job, so an idle-suspend
 #    policy cannot suspend the box mid-job (see below).
-# 2. If this host opts into OrbStack via runners.toml
+# 3. If this host opts into OrbStack via runners.toml
 #    (`container_runtime = "orbstack"`), recover a stopped or wedged daemon
 #    before GitHub sets up jobs.<name>.container.
 
 HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE="$(cd "$HOOKS/.." && pwd)"
 RT="${CONTAINER_RUNTIME:-}"
+
+# Sampled BEFORE ensure-orbstack.sh below: the snapshot is meant to describe the
+# state the job arrived into, not the state after this hook has perturbed it.
+# shellcheck source=hooks/_sidecars.sh
+[[ -r "$HOOKS/_sidecars.sh" ]] && . "$HOOKS/_sidecars.sh" && run_sidecars started
 
 if [[ -z "$RT" && -f "$BASE/.repo-path" ]]; then
   TOOLS="$(<"$BASE/.repo-path")"
