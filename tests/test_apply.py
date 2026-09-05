@@ -23,7 +23,7 @@ spec = importlib.util.spec_from_file_location(
 apply = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(apply)
 
-HOST = "j-air"
+HOST = "host-a"
 
 
 def reg(n, status="online"):
@@ -223,7 +223,7 @@ class RemoveRunnerTest(unittest.TestCase):
 class ReregisterTest(unittest.TestCase):
     """reregister's fail-safe ordering: mint the token BEFORE touching local state,
     so a token failure never strips a dir it then can't re-register (the bug that
-    left j-air's dotfiles-jl runners bare). And it must clear `.runner_migrated`,
+    left host-a's dotfiles-jl runners bare). And it must clear `.runner_migrated`,
     else config.sh --replace refuses with "already configured".
     """
 
@@ -251,7 +251,7 @@ class ReregisterTest(unittest.TestCase):
                 mock.patch.object(apply, "_svc_restart") as svc_restart,
             ):
                 with contextlib.redirect_stdout(io.StringIO()):
-                    result = apply.reregister("owner/repo", "dotfiles-jl-1", "j-air")
+                    result = apply.reregister("owner/repo", "dotfiles-jl-1", "host-a")
 
             self.assertFalse(result)
             run_cmd.assert_not_called()  # never touched config.sh
@@ -271,7 +271,7 @@ class ReregisterTest(unittest.TestCase):
                 ) as svc_restart,
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                result = apply.reregister("owner/repo", "dotfiles-jl-1", "j-air")
+                result = apply.reregister("owner/repo", "dotfiles-jl-1", "host-a")
 
             self.assertTrue(result)
             self.assertFalse((d / ".runner_migrated").exists())  # cleared
@@ -407,7 +407,7 @@ class DiscoverInstalledDirsTest(unittest.TestCase):
 
 
 class LoadDesiredTest(unittest.TestCase):
-    def _load(self, toml_text, host="j-m4"):
+    def _load(self, toml_text, host="host-b"):
         with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
             f.write(toml_text)
             path = Path(f.name)
@@ -419,68 +419,68 @@ class LoadDesiredTest(unittest.TestCase):
 
     def test_labels_parsed_and_not_treated_as_repo(self):
         counts, _, _, _, labels = self._load(
-            '[hosts.j-m4]\nlabels = ["bigmem"]\n"o/partygame" = 1\n'
+            '[hosts.host-b]\nlabels = ["bigmem"]\n"o/partygame" = 1\n'
         )
         self.assertEqual(labels, ("bigmem",))
         self.assertEqual(counts, {"o/partygame": 1})
 
     def test_labels_default_empty(self):
-        _, _, _, _, labels = self._load('[hosts.j-m4]\n"o/partygame" = 1\n')
+        _, _, _, _, labels = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
         self.assertEqual(labels, ())
 
     def test_labels_reject_bad_values(self):
         for bad in ('labels = "bigmem"', "labels = [1]", 'labels = ["has space"]'):
             with self.subTest(bad=bad), self.assertRaises(SystemExit):
-                self._load(f'[hosts.j-m4]\n{bad}\n"o/partygame" = 1\n')
+                self._load(f'[hosts.host-b]\n{bad}\n"o/partygame" = 1\n')
 
     def test_ci_slots_parsed_and_repos_intact(self):
         counts, ci_slots, _, _, _ = self._load(
-            '[hosts.j-m4]\nci_slots = 2\n"o/partygame" = 2\n'
+            '[hosts.host-b]\nci_slots = 2\n"o/partygame" = 2\n'
         )
         self.assertEqual(counts, {"o/partygame": 2})
         self.assertEqual(ci_slots, 2)
 
     def test_ci_slots_absent_falls_back_to_formula(self):
-        counts, ci_slots, _, _, _ = self._load('[hosts.j-m4]\n"o/partygame" = 1\n')
+        counts, ci_slots, _, _, _ = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
         self.assertEqual(counts, {"o/partygame": 1})
         self.assertEqual(ci_slots, apply._default_ci_slots())
 
     def test_ci_slots_invalid_exits(self):
         with self.assertRaises(SystemExit):
-            self._load('[hosts.j-m4]\nci_slots = 0\n"o/partygame" = 1\n')
+            self._load('[hosts.host-b]\nci_slots = 0\n"o/partygame" = 1\n')
 
     def test_e2e_workers_parsed(self):
         counts, _, e2e, _, _ = self._load(
-            '[hosts.j-m4]\nci_slots = 2\ne2e_workers = 3\n"o/partygame" = 2\n'
+            '[hosts.host-b]\nci_slots = 2\ne2e_workers = 3\n"o/partygame" = 2\n'
         )
         self.assertEqual(counts, {"o/partygame": 2})
         self.assertEqual(e2e, 3)
 
     def test_e2e_workers_absent_is_none(self):
-        _, _, e2e, _, _ = self._load('[hosts.j-m4]\n"o/partygame" = 1\n')
+        _, _, e2e, _, _ = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
         self.assertIsNone(e2e)
 
     def test_e2e_workers_invalid_exits(self):
         for bad in ("e2e_workers = 0", 'e2e_workers = "two"'):
             with self.assertRaises(SystemExit):
-                self._load(f'[hosts.j-m4]\n{bad}\n"o/partygame" = 1\n')
+                self._load(f'[hosts.host-b]\n{bad}\n"o/partygame" = 1\n')
 
     def test_work_root_parsed_and_not_treated_as_repo(self):
         counts, _, _, work_root, _ = self._load(
-            '[hosts.j-m4]\nwork_root = "/Volumes/Dev/jason/runner-work"\n'
+            '[hosts.host-b]\nwork_root = "/Volumes/Dev/jason/runner-work"\n'
             '"o/partygame" = 1\n'
         )
         self.assertEqual(counts, {"o/partygame": 1})
         self.assertEqual(work_root, "/Volumes/Dev/jason/runner-work")
 
     def test_work_root_absent_is_none(self):
-        _, _, _, work_root, _ = self._load('[hosts.j-m4]\n"o/partygame" = 1\n')
+        _, _, _, work_root, _ = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
         self.assertIsNone(work_root)
 
     def test_work_root_invalid_exits(self):
         for bad in ('work_root = "relative/path"', "work_root = 5"):
             with self.assertRaises(SystemExit):
-                self._load(f'[hosts.j-m4]\n{bad}\n"o/partygame" = 1\n')
+                self._load(f'[hosts.host-b]\n{bad}\n"o/partygame" = 1\n')
 
 
 class UpsertEnvTest(unittest.TestCase):

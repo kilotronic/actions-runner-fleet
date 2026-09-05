@@ -62,13 +62,13 @@ def test_plan_is_quiet_when_unwanted_and_absent():
 
 
 def test_want_serve_reads_the_hosts_flag():
-    cfg = {"hosts": {"schroeder": {"ollama_serve": True}}}
-    assert os_mod.load_want_serve(cfg, "schroeder") is True
+    cfg = {"hosts": {"host-c": {"ollama_serve": True}}}
+    assert os_mod.load_want_serve(cfg, "host-c") is True
 
 
 def test_want_serve_defaults_to_false_for_a_host_without_the_key():
-    cfg = {"hosts": {"lucy": {"ci_slots": 1}}}
-    assert os_mod.load_want_serve(cfg, "lucy") is False
+    cfg = {"hosts": {"host-d": {"ci_slots": 1}}}
+    assert os_mod.load_want_serve(cfg, "host-d") is False
 
 
 def test_want_serve_defaults_to_false_for_an_unknown_host():
@@ -77,6 +77,6 @@ def test_want_serve_defaults_to_false_for_an_unknown_host():
 
 
 def test_want_serve_rejects_a_non_boolean():
-    cfg = {"hosts": {"j-m4": {"ollama_serve": "yes"}}}
+    cfg = {"hosts": {"host-b": {"ollama_serve": "yes"}}}
     with pytest.raises(SystemExit, match="ollama_serve"):
-        os_mod.load_want_serve(cfg, "j-m4")
+        os_mod.load_want_serve(cfg, "host-b")

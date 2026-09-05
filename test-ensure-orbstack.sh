@@ -185,7 +185,7 @@ _assert lock-held "((ELAPSED < 10))" "returned immediately (${ELAPSED}s), did no
 # 8. The host SLEPT during the probe window. All three probes hang — identical
 #    to scenario 5 from the daemon's point of view — but the reason they hung
 #    is that the VM was suspended, not that it is wedged. This is the case that
-#    produced 91 spurious restarts on j-mini (25/25 of the ones pmset still
+#    produced 91 spurious restarts on one laptop host (25/25 of the ones pmset still
 #    covered fell within 5 min of a sleep/wake transition).
 SB=$(_sandbox wedge Running socket ok)
 echo 1 >"$SB/state/wake"

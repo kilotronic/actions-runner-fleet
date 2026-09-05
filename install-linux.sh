@@ -60,7 +60,7 @@ CI_PG_PORT="${CI_PG_PORT:-5433}"
 # parallelism high while giving each browser headroom. pytest-xdist reads this env.
 XDIST_AUTO_WORKERS="${PYTEST_XDIST_AUTO_NUM_WORKERS:-$(($(nproc) / 2 > 2 ? $(nproc) / 2 : 2))}"
 # Per-host worker count for the partygame CI browser-e2e pass. Declared as
-# e2e_workers in runners.toml and exported by apply.py (the old snoopy
+# e2e_workers in runners.toml and exported by apply.py (the old per-host
 # hardcode moved there); browser e2e is bound by *performance* cores, so pick
 # the value from fleet.md's "E2E worker budget". Empty = ci.yml default (1).
 HOOKS_DIR="$BASE_DIR/hooks"
