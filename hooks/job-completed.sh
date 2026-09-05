@@ -5,6 +5,14 @@
 # update-host.sh is internally locked, so concurrent hooks across runners
 # serialize cleanly.
 
+HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The completion half of the sidecar pair job-started.sh opens — a sidecar that
+# registers on start and never deregisters leaks whatever it opened. Runs before
+# the fleet update below so it is not delayed behind it.
+# shellcheck source=hooks/_sidecars.sh
+[[ -r "$HOOKS/_sidecars.sh" ]] && . "$HOOKS/_sidecars.sh" && run_sidecars completed
+
 REPO_PATH_FILE="$HOME/actions-runner/.repo-path"
 if [[ -f "$REPO_PATH_FILE" ]]; then
   UPDATER="$(<"$REPO_PATH_FILE")/update-host.sh"
