@@ -183,7 +183,7 @@ for i in $(seq 1 "$WORKERS"); do
   # Share one externals/ across every runner on this host. It is the single
   # largest thing in a runner dir (~349M: node20 + node24) and is byte-identical
   # in each one, since every runner extracts the same tarball — so N runners
-  # otherwise cost N × 349M for the same bytes. Six runners on j-mini went from
+  # otherwise cost N × 349M for the same bytes. Six runners on one host went from
   # 434M each to 85M each this way (3.4G → 2.1G) with no external volume
   # involved, which is why the work_root/removable-volume approach is not the
   # lever it looked like: it moves _work (measured at 86M) and leaves this
@@ -258,11 +258,11 @@ ENV
   # binary path — so a self-update invalidates the grant and re-triggers a
   # one-time interactive approval dialog. Nobody will be at the console to
   # click it on an unattended reboot, hanging the runner indefinitely (see
-  # fleet.md's j-mini section for the live repro). Trade-off: nothing in this
+  # fleet.md's laptop-host section for the live repro). Trade-off: nothing in this
   # repo currently re-applies a pinned RUNNER_VERSION bump to an
   # already-configured runner (install.sh skips dirs with an existing
   # .runner), so a disableupdate'd runner only gets a newer version via a
-  # manual uninstall+reinstall — same as this repo's own j-mini runners
+  # manual uninstall+reinstall — same as this repo's own laptop-host runners
   # today — until GitHub forces it offline for falling below the minimum
   # agent version. The array + ${arr[@]+"..."} expansion is empty-array-safe
   # under `set -u` on bash 3.2.

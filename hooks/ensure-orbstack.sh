@@ -110,7 +110,7 @@ _docker_ok_patient() { _timed "$_PATIENCE_PROBE" "$DOCKER" info &>/dev/null; }
 # and wall clock keeps running across a system sleep, so a suspended VM blows
 # through all three boxes while the daemon is perfectly healthy.
 #
-# This is not hypothetical. j-mini idle-sleeps (`pmset sleep 15`, `powernap 1`,
+# This is not hypothetical. A laptop host idle-sleeps (`pmset sleep 15`, `powernap 1`,
 # `tcpkeepalive 1`) and then DarkWakes every ~45s to service network, because
 # the runner's own long-poll to GitHub keeps waking it. Its watchdog ticks land
 # in those windows constantly. Measured 2026-08-08 over the window `pmset -g

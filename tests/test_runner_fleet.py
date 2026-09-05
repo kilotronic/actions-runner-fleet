@@ -61,14 +61,14 @@ class DiscoverRunnersTest(unittest.TestCase):
             write_runner_file(
                 base / "partygame-1",
                 "https://github.com/o/partygame",
-                agent_name="j-air-partygame-1",
+                agent_name="host-a-partygame-1",
             )
             runners = runner_fleet.discover_runners(base_dir=base)
             self.assertEqual(len(runners), 1)
             r = runners[0]
             self.assertEqual(r.dir, base / "partygame-1")
             self.assertEqual(r.repo, "o/partygame")
-            self.assertEqual(r.name, "j-air-partygame-1")
+            self.assertEqual(r.name, "host-a-partygame-1")
 
     def test_dir_without_runner_file_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -191,7 +191,7 @@ class MainJsonTest(unittest.TestCase):
         fake_runners = [
             runner_fleet.Runner(
                 dir=Path("/x/actions-runner/partygame-1"),
-                name="j-air-partygame-1",
+                name="host-a-partygame-1",
                 repo="o/partygame",
             )
         ]
@@ -211,7 +211,7 @@ class MainJsonTest(unittest.TestCase):
             [
                 {
                     "dir": "/x/actions-runner/partygame-1",
-                    "name": "j-air-partygame-1",
+                    "name": "host-a-partygame-1",
                     "repo": "o/partygame",
                     "busy": False,
                 }
