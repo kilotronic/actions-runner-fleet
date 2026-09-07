@@ -97,6 +97,23 @@ class DecideTest(unittest.TestCase):
         p = self.decide(LOW - 0.5, paused=["r-1"], idle=["r-2"])
         self.assertEqual(p.to_resume, ["r-1"])
 
+    def test_low_load_does_not_resume_when_lid_closed(self):
+        # A lid-closed laptop must stay offline even after load recovers,
+        # otherwise this watchdog undoes the lid watchdog.
+        p = lw.decide(
+            LOW - 0.5,
+            0,
+            ["r-1"],
+            [],
+            low=LOW,
+            high=HIGH,
+            debounce=DEBOUNCE,
+            lid_closed=True,
+        )
+        self.assertEqual(p.to_resume, [])
+        self.assertEqual(p.to_pause, [])
+        self.assertEqual(p.high_ticks, 0)
+
     # ── Boundary conditions ───────────────────────────────────────────────────
 
     def test_exactly_low_is_deadband_not_resume(self):
