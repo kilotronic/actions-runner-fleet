@@ -159,6 +159,8 @@ esac
     "$PY" "./$1" --install-timer >/dev/null 2>&1 || echo "WARN: $2 timer install failed"
   }
   _install_timer load-watchdog.py "load-watchdog"
+  # macOS-only; --install-timer is a clean no-op on Linux.
+  _install_timer lid-watchdog.py "lid-watchdog"
   _install_timer maintenance-timer.py "maintenance"
   # OrbStack watchdog is toml-opt-in (container_runtime = "orbstack").
   # Converge both directions so dropping the flag tears the timer down.

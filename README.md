@@ -38,16 +38,17 @@ with a tailnet ACL.
 
 ## Tools
 
-| Tool                              | What it does                                                                 |
-| --------------------------------- | ---------------------------------------------------------------------------- |
-| `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove) |
-| `load-watchdog.py`                | Pause idle listeners when per-core load is high; resume when it drops        |
-| `maintenance-timer.py`            | Every 2h: `update-host.sh` so idle hosts still self-heal                     |
-| `runner_timers.py`                | Shared launchd / systemd `--user` installer                                  |
-| `orbstack-watchdog.py`            | Installed only when `container_runtime = "orbstack"`                         |
-| `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off  |
-| `hooks/ensure-orbstack.sh`        | Four-state OrbStack recovery (healthy / down / slow / wedged)                |
-| `install.sh` / `install-linux.sh` | Register runners, install load + maintenance timers                          |
+| Tool                              | What it does                                                                  |
+| --------------------------------- | ----------------------------------------------------------------------------- |
+| `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove)  |
+| `load-watchdog.py`                | Pause idle listeners when per-core load is high; resume when it drops         |
+| `lid-watchdog.py`                 | Pause idle listeners on a laptop whose lid is closed (macOS; no-op elsewhere) |
+| `maintenance-timer.py`            | Every 2h: `update-host.sh` so idle hosts still self-heal                      |
+| `runner_timers.py`                | Shared launchd / systemd `--user` installer                                   |
+| `orbstack-watchdog.py`            | Installed only when `container_runtime = "orbstack"`                          |
+| `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off   |
+| `hooks/ensure-orbstack.sh`        | Four-state OrbStack recovery (healthy / down / slow / wedged)                 |
+| `install.sh` / `install-linux.sh` | Register runners, install load / lid / maintenance timers                     |
 
 OrbStack ensure is a **host** concern: the job-started hook runs before GitHub
 sets up `jobs.<name>.container`, and the watchdog runs when no job is queued.

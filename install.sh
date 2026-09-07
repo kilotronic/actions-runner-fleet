@@ -370,6 +370,11 @@ done
 info "Installing load watchdog timer..."
 python3 "$SCRIPT_DIR/load-watchdog.py" --install-timer || echo "  warning: load watchdog timer install failed"
 
+# Pauses idle runners when a laptop lid is closed; no-op on desktops (no
+# AppleClamshellState). Opt out via ~/actions-runner/.no-lid-watchdog.
+info "Installing lid watchdog timer..."
+python3 "$SCRIPT_DIR/lid-watchdog.py" --install-timer || echo "  warning: lid watchdog timer install failed"
+
 # ── Fleet maintenance timer ───────────────────────────────────────────────────
 # Converges runners to runners.toml every 2h so idle/asleep hosts self-heal.
 # Self-installing launchd timer (idempotent); opt out via ~/actions-runner/.no-auto-update.
