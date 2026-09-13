@@ -40,7 +40,7 @@ with a tailnet ACL.
 
 | Tool                              | What it does                                                                  |
 | --------------------------------- | ----------------------------------------------------------------------------- |
-| `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove)  |
+| `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove), then restart hung listeners |
 | `load-watchdog.py`                | Pause idle listeners when per-core load is high; resume when it drops         |
 | `lid-watchdog.py`                 | Pause idle listeners on a laptop whose lid is closed (macOS; no-op elsewhere) |
 | `maintenance-timer.py`            | Every 2h: `update-host.sh` so idle hosts still self-heal                      |
@@ -49,6 +49,11 @@ with a tailnet ACL.
 | `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off   |
 | `hooks/ensure-orbstack.sh`        | Four-state OrbStack recovery (healthy / down / slow / wedged)                 |
 | `install.sh` / `install-linux.sh` | Register runners, install load / lid / maintenance timers                     |
+| `status.sh`                       | Report runners, container runtime and CI Postgres for one repo                |
+| `runner-status.30s.py`            | SwiftBar menu bar plugin showing live fleet status (macOS)                    |
+| `install-menubar.sh`              | Install the SwiftBar plugin above                                             |
+| `exclude-ci-paths.sh`             | Keep Spotlight / Time Machine / Photos off the CI work trees (macOS)          |
+| `reclaim-ci-disk.sh`              | Thin Time Machine local snapshots when a CI host runs low on disk (macOS)     |
 
 OrbStack ensure is a **host** concern: the job-started hook runs before GitHub
 sets up `jobs.<name>.container`, and the watchdog runs when no job is queued.
@@ -67,7 +72,45 @@ here.
 4. `./apply.py --dry-run` then `./apply.py`
 
 Disable auto-update with `touch ~/actions-runner/.no-auto-update`. Disable
-destructive removals with `touch ~/actions-runner/.no-auto-prune`.
+destructive removals with `touch ~/actions-runner/.no-auto-prune`. Disable the
+hung-listener sweep with `touch ~/actions-runner/.no-runner-health`.
+
+## Hung listeners
+
+Every restart mechanism here keys off process *exit*: the launchd plist's
+`KeepAlive`/`SuccessfulExit`, and the systemd unit's `Restart=`. A listener that
+**hangs instead of exiting** therefore defeats all of them. This is not
+hypothetical — a runner took a job, lost its worker, and sat with that job still
+assigned for ten days: `run.sh` alive, PID present in `launchctl list`, and
+`offline` on GitHub the whole time. Nothing noticed, and the host quietly ran at
+half its configured capacity for a week and a half.
+
+`apply.py` sweeps for exactly that mismatch after converging each repo: a runner
+**registered-but-offline on GitHub while its service is running locally and it
+holds no `Runner.Worker`**. Four guards keep it from bouncing anything healthy —
+a busy runner is working (an offline status against a live worker is a
+GitHub-side blip); a runner the load or lid watchdog paused is offline on
+purpose; a stopped service is somebody's deliberate act; and an *unregistered*
+dir is `decide()`'s re-register case, not this one.
+
+Detection is debounced on **elapsed time**, not on a count of passes: a runner
+must still be hung `HUNG_GRACE_SECONDS` (2h, one maintenance tick) after it was
+first flagged. A count would mean nothing here, because `apply.py` runs on every
+job-completed hook as well as the timer — "seen twice in a row" can be two
+passes seconds apart on a busy host. The suspect clock lives in
+`~/actions-runner/runner-health.state`, is cleared the moment a runner comes
+back online, and is dropped when a runner dir disappears (dir names get reused,
+and an inherited timestamp would skip the grace window). A restarted runner is
+dropped from the state too, bounding this to at most one restart per runner per
+grace period: a runner that genuinely cannot be revived bounces every 2h and
+says so in `update.log` rather than spinning in a relaunch loop.
+
+Worst-case recovery is two grace periods (~4h) from the moment a listener
+wedges. Listener log mtime was evaluated as a cheaper, network-free signal and
+rejected: a listener rotates to a fresh `_diag/Runner_*.log` on every restart
+(and `apply.py` restarts runners routinely), so a stale log tracks restarts
+rather than health — and the wedged listener above still logged sporadically
+across its ten days.
 
 ## License
 

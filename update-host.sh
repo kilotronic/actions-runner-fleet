@@ -184,4 +184,23 @@ esac
   if [[ -n "$PY" && -f ./apply.py ]]; then
     "$PY" ./apply.py || true
   fi
+
+  # Keep macOS desktop background services off the CI work trees (macOS-only;
+  # a clean no-op on Linux hosts). Converged every tick rather than at install
+  # time because most of what needs excluding does not exist until jobs have
+  # run — a checkout's .venv/node_modules appear long after install finished,
+  # and each new worktree brings more. Idempotent and silent once converged.
+  if [[ -x ./exclude-ci-paths.sh ]]; then
+    ./exclude-ci-paths.sh 2>&1 | grep -vE '^(==>|    |already converged|not macOS)' || true
+  fi
+
+  # Reclaim disk by thinning Time Machine local snapshots when the host is
+  # actually short of space (macOS-only, silent above the threshold). NOT
+  # covered by the exclusions above: a local snapshot is a whole-volume APFS
+  # snapshot, so it pins CI churn regardless of what Time Machine is configured
+  # to copy. On one host this had taken the disk to 92%, and freeing 4.7 GB of
+  # caches returned nothing at all because the snapshots still held the blocks.
+  if [[ -x ./reclaim-ci-disk.sh ]]; then
+    ./reclaim-ci-disk.sh 2>&1 | grep -vE '^(disk:|above threshold|not macOS)' || true
+  fi
 } >>"$LOG" 2>&1
