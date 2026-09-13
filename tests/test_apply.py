@@ -776,3 +776,249 @@ class ConvergeLabelsTest(unittest.TestCase):
         with mock.patch.object(apply, "_run", return_value=0) as r:
             self.assertEqual(apply.converge_labels("o/p", gh, ("bigmem",)), 0)
         r.assert_not_called()
+
+
+class HungDirsTest(unittest.TestCase):
+    """The hung-listener signal: offline on GitHub while running here and idle.
+
+    A listener that wedges instead of exiting defeats launchd KeepAlive and
+    systemd Restart= alike (both key off process exit), so nothing noticed a
+    runner sitting dead for ten days. These tests pin the guards that keep the
+    fix from bouncing runners that are merely busy, deliberately paused, or not
+    running at all.
+    """
+
+    def hung(self, gh, local_dirs, running=True, **kw):
+        return apply.hung_dirs(
+            gh,
+            local_dirs,
+            host=HOST,
+            service_running=kw.pop("service_running", lambda d: running),
+            **kw,
+        )
+
+    def test_offline_running_and_idle_is_hung(self):
+        gh = [reg("partygame-1", status="offline")]
+        self.assertEqual(self.hung(gh, ["partygame-1"]), ["partygame-1"])
+
+    def test_online_runner_is_healthy(self):
+        gh = [reg("partygame-1", status="online")]
+        self.assertEqual(self.hung(gh, ["partygame-1"]), [])
+
+    def test_busy_runner_is_never_hung(self):
+        """A live Runner.Worker means it is working; an offline status against
+        that is a GitHub-side blip, and a restart would abort a real job."""
+        gh = [reg("partygame-1", status="offline")]
+        self.assertEqual(self.hung(gh, ["partygame-1"], busy_dirs={"partygame-1"}), [])
+
+    def test_load_watchdog_paused_runner_is_left_alone(self):
+        """The watchdog stops services on purpose — offline is the goal, not a
+        fault. Restarting here would fight it every tick."""
+        gh = [reg("partygame-1", status="offline")]
+        self.assertEqual(
+            self.hung(gh, ["partygame-1"], paused_dirs={"partygame-1"}), []
+        )
+
+    def test_stopped_service_is_not_hung(self):
+        """Nothing is running to be wedged; someone stopped it deliberately."""
+        gh = [reg("partygame-1", status="offline")]
+        self.assertEqual(self.hung(gh, ["partygame-1"], running=False), [])
+
+    def test_unregistered_dir_is_decides_problem_not_ours(self):
+        """No registration at all is the sleep-deregistration case that
+        decide() re-registers — not a hung listener."""
+        self.assertEqual(self.hung([], ["partygame-1"]), [])
+
+    def test_gh_failure_yields_nothing(self):
+        """Same skip contract as decide(): no GitHub side, no mismatch."""
+        self.assertEqual(self.hung(None, ["partygame-1"]), [])
+
+    def test_service_is_not_probed_when_nothing_is_offline(self):
+        """service_running shells out per dir and apply.py runs on every
+        job-completed hook, so the common (all-healthy) case must cost nothing."""
+        probe = mock.Mock(return_value=True)
+        gh = [reg("partygame-1"), reg("partygame-2")]
+        self.hung(gh, ["partygame-1", "partygame-2"], service_running=probe)
+        probe.assert_not_called()
+
+    def test_results_are_ordered_by_runner_index(self):
+        gh = [reg(f"partygame-{i}", status="offline") for i in (10, 2, 1)]
+        self.assertEqual(
+            self.hung(gh, ["partygame-10", "partygame-2", "partygame-1"]),
+            ["partygame-1", "partygame-2", "partygame-10"],
+        )
+
+
+class DebounceHungTest(unittest.TestCase):
+    """Elapsed time gates the restart, not a run count: apply.py runs on every
+    job-completed hook as well as the 2h timer, so "seen twice in a row" can be
+    two passes seconds apart."""
+
+    GRACE = apply.HUNG_GRACE_SECONDS
+
+    def test_first_sighting_records_but_does_not_act(self):
+        act, seen = apply.debounce_hung(1000.0, {}, {"partygame-1"}, {"partygame-1"})
+        self.assertEqual(act, [])
+        self.assertEqual(seen, {"partygame-1": 1000.0})
+
+    def test_still_hung_inside_the_grace_window_keeps_waiting(self):
+        act, seen = apply.debounce_hung(
+            1000.0 + self.GRACE - 1,
+            {"partygame-1": 1000.0},
+            {"partygame-1"},
+            {"partygame-1"},
+        )
+        self.assertEqual(act, [])
+        self.assertEqual(seen, {"partygame-1": 1000.0})  # clock keeps running
+
+    def test_still_hung_after_the_grace_window_restarts(self):
+        act, seen = apply.debounce_hung(
+            1000.0 + self.GRACE,
+            {"partygame-1": 1000.0},
+            {"partygame-1"},
+            {"partygame-1"},
+        )
+        self.assertEqual(act, ["partygame-1"])
+        self.assertEqual(seen, {})  # cleared: next pass re-arms a full grace
+
+    def test_recovered_runner_is_forgotten(self):
+        """Evaluated and no longer hung → the clock resets, so a runner that
+        flaps offline briefly never accumulates its way to a restart."""
+        act, seen = apply.debounce_hung(
+            9999.0, {"partygame-1": 1000.0}, set(), {"partygame-1"}
+        )
+        self.assertEqual(act, [])
+        self.assertEqual(seen, {})
+
+    def test_unevaluated_runner_keeps_its_clock(self):
+        """Its repo's gh query failed, so we have no evidence either way.
+        Clearing would restart the grace clock forever on a flaky-gh host."""
+        act, seen = apply.debounce_hung(9999.0, {"partygame-1": 1000.0}, set(), set())
+        self.assertEqual(act, [])
+        self.assertEqual(seen, {"partygame-1": 1000.0})
+
+    def test_removed_runner_dir_loses_its_clock(self):
+        """Runner dir names are reused (remove partygame-2, install a new one
+        under the same name). An inherited timestamp would make the new runner
+        restart on its first sighting, skipping the grace window entirely."""
+        act, seen = apply.debounce_hung(
+            9999.0, {"partygame-2": 1000.0}, set(), set(), known={"partygame-1"}
+        )
+        self.assertEqual(act, [])
+        self.assertEqual(seen, {})
+
+    def test_existing_but_unevaluated_dir_still_keeps_its_clock(self):
+        """`known` prunes what is GONE; it must not undo the flaky-gh carry-forward
+        for a dir that is still installed."""
+        act, seen = apply.debounce_hung(
+            9999.0,
+            {"partygame-1": 1000.0},
+            set(),
+            set(),
+            known={"partygame-1"},
+        )
+        self.assertEqual(act, [])
+        self.assertEqual(seen, {"partygame-1": 1000.0})
+
+    def test_restart_is_bounded_to_one_per_grace_period(self):
+        """A runner that cannot be revived bounces every grace period and says
+        so in the log — it does not spin in a tight relaunch loop."""
+        now = 1000.0 + self.GRACE
+        act, seen = apply.debounce_hung(
+            now, {"partygame-1": 1000.0}, {"partygame-1"}, {"partygame-1"}
+        )
+        self.assertEqual(act, ["partygame-1"])
+        # Next pass, one second later: still hung, but the clock restarted.
+        act2, seen2 = apply.debounce_hung(
+            now + 1, seen, {"partygame-1"}, {"partygame-1"}
+        )
+        self.assertEqual(act2, [])
+        self.assertEqual(seen2, {"partygame-1": now + 1})
+
+
+class ApplyHungRestartsTest(unittest.TestCase):
+    def test_dir_that_became_busy_is_not_restarted(self):
+        """_svc_restart is an unconditional kill+relaunch with no server-side
+        busy guard, and this runs at the end of a pass that may have spent
+        minutes installing runners."""
+        with mock.patch.object(apply, "_svc_restart") as svc_restart:
+            failed = apply.apply_hung_restarts(["partygame-1"], is_busy=lambda dn: True)
+        self.assertEqual(failed, 0)
+        svc_restart.assert_not_called()
+
+    def test_idle_dir_is_restarted(self):
+        with mock.patch.object(apply, "_svc_restart", return_value=True) as svc_restart:
+            with contextlib.redirect_stdout(io.StringIO()):
+                failed = apply.apply_hung_restarts(
+                    ["partygame-1"], is_busy=lambda dn: False
+                )
+        self.assertEqual(failed, 0)
+        svc_restart.assert_called_once_with("partygame-1")
+
+    def test_failed_restart_is_counted(self):
+        with mock.patch.object(apply, "_svc_restart", return_value=False):
+            with contextlib.redirect_stdout(io.StringIO()):
+                failed = apply.apply_hung_restarts(
+                    ["partygame-1"], is_busy=lambda dn: False
+                )
+        self.assertEqual(failed, 1)
+
+
+class HealthStateTest(unittest.TestCase):
+    def test_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(
+                apply, "HEALTH_STATE_FILE", Path(tmpdir) / "runner-health.state"
+            ):
+                apply.save_health_state({"partygame-1": 1000.4})
+                self.assertEqual(apply.load_health_state(), {"partygame-1": 1000.0})
+
+    def test_missing_or_corrupt_state_reads_as_empty(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "runner-health.state"
+            with mock.patch.object(apply, "HEALTH_STATE_FILE", path):
+                self.assertEqual(apply.load_health_state(), {})
+                path.write_text("{not json")
+                self.assertEqual(apply.load_health_state(), {})
+
+    def test_load_watchdog_paused_is_read_from_its_state_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "load-watchdog.state").write_text(
+                '{"high_ticks": 3, "paused": ["partygame-2"]}'
+            )
+            with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
+                self.assertEqual(apply.load_watchdog_paused(), {"partygame-2"})
+
+    def test_lid_watchdog_paused_counts_too(self):
+        """A laptop with the lid shut parks runners via lid-watchdog alone —
+        nothing lands in load-watchdog.state, so reading only that file would
+        treat every parked runner on a closed laptop as a hung listener."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "lid-watchdog.state").write_text(
+                '{"paused": ["partygame-1", "dotfiles-jl-1"]}'
+            )
+            with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
+                self.assertEqual(
+                    apply.load_watchdog_paused(), {"partygame-1", "dotfiles-jl-1"}
+                )
+
+    def test_both_watchdog_state_files_are_unioned(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "load-watchdog.state").write_text('{"paused": ["a-1"]}')
+            (Path(tmpdir) / "lid-watchdog.state").write_text('{"paused": ["b-1"]}')
+            with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
+                self.assertEqual(apply.load_watchdog_paused(), {"a-1", "b-1"})
+
+    def test_one_corrupt_state_file_does_not_hide_the_other(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "load-watchdog.state").write_text("{not json")
+            (Path(tmpdir) / "lid-watchdog.state").write_text('{"paused": ["b-1"]}')
+            with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
+                self.assertEqual(apply.load_watchdog_paused(), {"b-1"})
+
+    def test_load_watchdog_paused_fails_open_when_unreadable(self):
+        """Safe only because hung_dirs' service_running probe already excludes a
+        paused runner (its service is stopped) — this is the belt to that braces."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
+                self.assertEqual(apply.load_watchdog_paused(), set())
