@@ -7,7 +7,9 @@ Reads the fleet config (see fleet_config.py), finds the entry for this host
 runners.
 
 Usage:
-    ./apply.py                  # converge
+    ./apply.py                  # converge, then restart hung listeners
+                                #   (running here but offline on GitHub;
+                                #   honors .no-runner-health)
     ./apply.py --dry-run        # print the plan, change nothing
     ./apply.py --config PATH    # override config path
     APPLY_HOST=other ./apply.py # use a different host key
@@ -24,6 +26,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from collections import Counter, namedtuple
 from pathlib import Path
 
@@ -169,6 +172,140 @@ def decide(
         to_remove = []
 
     return Plan(to_reregister, to_install, to_remove, to_cleanup, capped)
+
+
+# ── Hung-listener detection (pure; unit-tested in test_apply.py) ─────────────
+
+# A listener that HANGS rather than exits is invisible to every restart
+# mechanism this fleet has. The launchd plist's KeepAlive/SuccessfulExit and the
+# systemd unit's Restart= both key off process *exit*; a run.sh whose
+# Runner.Listener is wedged never exits, so neither ever fires. This is not
+# hypothetical: a runner took a job, lost its worker, and then sat with that job
+# still assigned for TEN DAYS — process alive, PID present in `launchctl list`,
+# and `offline` on GitHub the entire time. Nothing noticed, and the host quietly
+# ran at half its configured capacity for a week and a half.
+#
+# The signal is exactly that mismatch: GitHub reports the runner offline while
+# its service is running here and no Runner.Worker exists. Listener log mtime
+# was evaluated and rejected as the signal — a listener rotates to a fresh
+# _diag/Runner_*.log on every restart (and apply.py restarts runners routinely),
+# so "stale log" tracks restarts rather than health, and the wedged listener
+# above still logged sporadically across its ten days.
+
+HUNG_GRACE_SECONDS = (
+    7200  # must stay hung this long to be acted on (= 1 maintenance tick)
+)
+HEALTH_STATE_FILE = RUNNER_BASE / "runner-health.state"
+NO_HEALTH_FILE = RUNNER_BASE / ".no-runner-health"
+
+
+def hung_dirs(
+    gh_runners,
+    local_dirs,
+    *,
+    host,
+    service_running,
+    busy_dirs=frozenset(),
+    paused_dirs=frozenset(),
+):
+    """Local dir basenames whose listener looks hung. Pure given its inputs.
+
+    A dir qualifies only if ALL of these hold:
+      * GitHub has a registration for it with status "offline" — an
+        *unregistered* dir is decide()'s dead/re-register case, not this one;
+      * it is not in `busy_dirs` (no Runner.Worker) — a busy runner is working,
+        and an offline status against a live worker is a GitHub-side blip;
+      * it is not in `paused_dirs` — the load and lid watchdogs stop services
+        on purpose, and offline is the intended result, not a fault;
+      * `service_running(dir)` is True — the whole point is "running here but
+        offline there". A stopped service is someone's deliberate act (or the
+        watchdog's), and restarting it would fight them.
+
+    `service_running` is probed LAST and only for dirs that already passed the
+    cheap filters: it shells out per dir, and apply.py runs on every
+    job-completed hook, not just the 2h timer. In the overwhelmingly common
+    case (nothing offline) it is never called at all.
+
+    The paused_dirs and service_running guards overlap on purpose: a
+    watchdog-paused runner has its service stopped, so service_running alone
+    already excludes it. paused_dirs is the belt to that braces, and keeps the
+    exclusion correct even if load-watchdog.state is unreadable.
+
+    gh_runners is None (the gh query failed) → no dirs, same skip contract as
+    decide(): with no GitHub side there is no mismatch to observe.
+    """
+    if gh_runners is None:
+        return []
+
+    offline = {
+        r["name"] for r in gh_runners if (r.get("status") or "").lower() == "offline"
+    }
+    candidates = [
+        d
+        for d in local_dirs
+        if f"{host}-{d}" in offline and d not in busy_dirs and d not in paused_dirs
+    ]
+    return sorted((d for d in candidates if service_running(d)), key=_dir_index)
+
+
+def debounce_hung(
+    now, first_seen, hung_now, evaluated, *, known=None, grace=HUNG_GRACE_SECONDS
+):
+    """Decide which suspects have been hung long enough to restart. Pure.
+
+    now         epoch seconds.
+    first_seen  {dirname: epoch} persisted from earlier runs.
+    hung_now    dirnames that look hung on THIS pass (from hung_dirs).
+    evaluated   dirnames we actually had GitHub data for on this pass. A dir
+                we could not evaluate (its repo's gh query failed) keeps its
+                record untouched: absence of evidence is not evidence of health,
+                and clearing it would restart the grace clock forever on a host
+                with flaky `gh`.
+    known       every runner dir that still exists on the host, or None to skip
+                the check. Records for dirs outside it are dropped — a removed
+                runner must not leave its clock behind, because runner dir names
+                are REUSED (remove partygame-2, install a new one, same name)
+                and an inherited ancient timestamp would make the new runner
+                restart on its first sighting, skipping the grace window
+                entirely. Distinct from `evaluated`: a dir that still exists but
+                whose gh query failed keeps its clock; one that is gone loses it.
+
+    Returns (to_restart, new_first_seen).
+
+    Elapsed time, not a run count, is what gates the restart — apply.py runs on
+    every job-completed hook as well as the 2h maintenance timer, so "seen hung
+    twice in a row" can mean two passes eight seconds apart on a busy host,
+    which is no confirmation at all. Requiring `grace` to elapse makes the
+    guarantee independent of how often this runs: a runner is restarted only if
+    it was still hung a full maintenance tick after we first noticed.
+
+    A restarted dir is dropped from the state, so if the restart does not take,
+    the next pass re-records it and it gets another full `grace` before the next
+    attempt. That bounds this to at most one restart per runner per `grace` —
+    a wedged runner that cannot be revived bounces every 2h and says so in
+    update.log, rather than spinning in a tight relaunch loop.
+    """
+    hung_now = set(hung_now)
+    evaluated = set(evaluated)
+
+    # Carry forward records for dirs we had no GitHub data for this pass,
+    # dropping any whose runner dir no longer exists.
+    new_first_seen = {
+        dn: ts
+        for dn, ts in first_seen.items()
+        if dn not in evaluated and (known is None or dn in known)
+    }
+
+    to_restart = []
+    for dn in sorted(hung_now, key=_dir_index):
+        started = first_seen.get(dn)
+        if started is None:
+            new_first_seen[dn] = now  # first sighting: record, act next time
+        elif now - started >= grace:
+            to_restart.append(dn)  # confirmed hung across a full tick
+        else:
+            new_first_seen[dn] = started  # still inside the grace window
+    return to_restart, new_first_seen
 
 
 def short_hostname() -> str:
@@ -589,6 +726,117 @@ def apply_env_restarts(env_work, reregistered, *, is_busy=None) -> int:
     return failed
 
 
+# ── Hung-listener execution (I/O side of hung_dirs/debounce_hung) ────────────
+
+
+def _svc_running(dirname: str) -> bool:
+    """True iff this runner's service is currently loaded/active on the host.
+
+    Mirrors load-watchdog.py's service_active(). "Running" here means the
+    service manager holds it, which is the half of the hung signal we can only
+    see locally — it says nothing about whether the listener inside is healthy.
+    """
+    if IS_MAC:
+        label = f"com.github.actions-runner.{dirname}"
+        return _run(["launchctl", "print", f"gui/{os.getuid()}/{label}"]) == 0
+    return (
+        _run(
+            [
+                "systemctl",
+                "--user",
+                "is-active",
+                "--quiet",
+                f"github-runner-{dirname}.service",
+            ]
+        )
+        == 0
+    )
+
+
+# Every watchdog that parks a runner records it as {"paused": [dirname, ...]}
+# in its own state file. Read them ALL: a laptop with its lid shut has runners
+# parked by lid-watchdog alone, with nothing in load-watchdog.state.
+WATCHDOG_STATE_FILES = ("load-watchdog.state", "lid-watchdog.state")
+
+
+def load_watchdog_paused() -> set:
+    """Dirnames a watchdog has deliberately parked, per the watchdog state files.
+
+    Unreadable/absent/malformed → contributes nothing. Safe to fail open here
+    only because a parked runner's service is stopped, so hung_dirs()'s
+    service_running probe excludes it regardless — see that docstring.
+    """
+    paused: set = set()
+    for name in WATCHDOG_STATE_FILES:
+        try:
+            data = json.loads((RUNNER_BASE / name).read_text())
+            paused |= set(data.get("paused", []))
+        except (
+            FileNotFoundError,
+            json.JSONDecodeError,
+            OSError,
+            ValueError,
+            TypeError,
+        ):
+            continue
+    return paused
+
+
+def load_health_state() -> dict:
+    """{dirname: first-seen-hung epoch} from the last run; {} if unusable."""
+    try:
+        data = json.loads(HEALTH_STATE_FILE.read_text())
+        seen = data.get("first_seen", {})
+        return {str(k): float(v) for k, v in seen.items()}
+    except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError, TypeError):
+        return {}
+
+
+def save_health_state(first_seen: dict) -> None:
+    """Persist the suspect clock. Best-effort: a write failure must not fail a
+    convergence run — it only costs this tick's debounce progress."""
+    try:
+        HEALTH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HEALTH_STATE_FILE.write_text(
+            json.dumps(
+                {"first_seen": {k: round(v) for k, v in sorted(first_seen.items())}}
+            )
+        )
+    except OSError as e:
+        print(f"  ! could not write {HEALTH_STATE_FILE.name}: {e}")
+
+
+def apply_hung_restarts(to_restart, *, is_busy=None) -> int:
+    """Restart each confirmed-hung runner. Returns the count of failures.
+
+    Busy is re-checked fresh immediately before acting, for the same reason
+    apply_env_restarts() does it: _svc_restart() is an unconditional
+    kill+relaunch with no server-side busy guard, and this runs at the very end
+    of a convergence pass that may have spent minutes in install_runners(). A
+    dir that picked up a job in the meantime is left alone — it is plainly not
+    hung anymore, and killing it would abort a live job.
+    """
+    if is_busy is None:
+
+        def is_busy(dn):
+            return runner_fleet.is_busy(
+                RUNNER_BASE / dn, runner_fleet.worker_cmdlines()
+            )
+
+    failed = 0
+    for dn in to_restart:
+        if is_busy(dn):
+            continue  # took a job since the scan: not hung after all
+        if _svc_restart(dn):
+            print(
+                f"  {dn}: restarted (listener was hung: running here, offline on GitHub)"
+            )
+        else:
+            print(f"  ! {dn}: restart of hung listener failed")
+            failed += 1
+    return failed
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Converge this host's runners to runners.toml."
@@ -676,6 +924,13 @@ def main() -> int:
     short_counts = Counter(r.split("/")[-1] for r in all_repos)
     failed = 0
 
+    # Hung-listener sweep state, accumulated across the per-repo loop below and
+    # acted on once after it (the debounce clock is per-host, not per-repo).
+    health_enabled = not NO_HEALTH_FILE.exists()
+    paused_dirs = load_watchdog_paused() if health_enabled else set()
+    hung_now: set[str] = set()
+    evaluated_dirs: set[str] = set()
+
     for repo in all_repos:
         D = desired.get(repo, 0)
         repo_name = repo.split("/")[-1]
@@ -698,6 +953,23 @@ def main() -> int:
             show_header()
             print(f"[{repo}] gh unavailable — skipping convergence (needs tokens)")
             continue
+
+        if health_enabled:
+            # Record before the in-sync `continue` below: a host can be
+            # perfectly converged on counts and still have a wedged listener —
+            # in the observed case the runner stayed *registered* (so decide()
+            # saw it as healthy) while its listener was dead.
+            evaluated_dirs.update(local_dirs)
+            hung_now.update(
+                hung_dirs(
+                    gh,
+                    local_dirs,
+                    host=host,
+                    service_running=_svc_running,
+                    busy_dirs=busy_dirs,
+                    paused_dirs=paused_dirs,
+                )
+            )
 
         plan = decide(
             D, local_dirs, gh, host=host, busy_dirs=busy_dirs, allow_remove=allow_remove
@@ -785,6 +1057,37 @@ def main() -> int:
         # .env last: a just-re-registered runner was restarted above and is idle.
         reregistered = set(plan.to_reregister)
         failed += apply_env_restarts(env_work, reregistered)
+
+    # Hung-listener sweep. Runs after every repo has been converged so a restart
+    # here can never race an install/remove on the same dir, and so the fresh
+    # busy re-check inside apply_hung_restarts() reflects the final state.
+    if health_enabled:
+        # Re-discover after the loop: removals/installs above have landed, so
+        # this is the authoritative set of dirs whose clocks may survive.
+        known_dirs = {
+            r.dir.name for r in runner_fleet.discover_runners(base_dir=RUNNER_BASE)
+        }
+        to_restart, new_seen = debounce_hung(
+            time.time(),
+            load_health_state(),
+            hung_now,
+            evaluated_dirs,
+            known=known_dirs,
+        )
+        grace_h = HUNG_GRACE_SECONDS // 3600
+        watching = sorted(set(new_seen) & hung_now, key=_dir_index)
+        if watching or to_restart:
+            show_header()
+        for dn in watching:
+            print(
+                f"[hung] {dn}: running here but offline on GitHub — "
+                f"watching (restart if still hung in {grace_h}h)"
+            )
+        for dn in to_restart:
+            print(f"[hung] {dn}: still offline after {grace_h}h — restarting listener")
+        if not args.dry_run:
+            failed += apply_hung_restarts(to_restart)
+            save_health_state(new_seen)
 
     if args.dry_run:
         print("\n(dry-run; no changes made)")
