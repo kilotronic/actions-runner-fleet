@@ -1024,6 +1024,36 @@ class HealthStateTest(unittest.TestCase):
                 self.assertEqual(apply.load_watchdog_paused(), set())
 
 
+class RunRedactsTokensTest(unittest.TestCase):
+    """run() echoes each command into update.log. A registration or removal
+    token there is usable by anyone who can read the log until it expires."""
+
+    def _printed(self, cmd):
+        out = io.StringIO()
+        with (
+            mock.patch.object(apply.subprocess, "call", return_value=0) as call,
+            contextlib.redirect_stdout(out),
+        ):
+            apply.run(cmd)
+        return out.getvalue(), call
+
+    def test_token_value_is_not_printed_but_is_still_passed(self):
+        cmd = ["config.sh", "remove", "--token", "AAM5SECRETTOKEN"]
+        printed, call = self._printed(cmd)
+        self.assertNotIn("AAM5SECRETTOKEN", printed)
+        self.assertIn("--token ***", printed)
+        call.assert_called_once_with(cmd)
+
+    def test_equals_form_is_redacted_too(self):
+        printed, _ = self._printed(["config.sh", "--token=AAM5SECRETTOKEN"])
+        self.assertNotIn("AAM5SECRETTOKEN", printed)
+        self.assertIn("--token=***", printed)
+
+    def test_command_without_a_token_is_printed_unchanged(self):
+        printed, _ = self._printed(["install.sh", "owner/repo", "2"])
+        self.assertIn("$ install.sh owner/repo 2", printed)
+
+
 class ReregisterLabelsTest(unittest.TestCase):
     """The runner applies self-hosted, its OS and its real architecture as
     default labels itself. reregister used to pass them hardcoded, tagging every

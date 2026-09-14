@@ -354,8 +354,22 @@ def discover_installed_dirs(repo_name: str) -> list[str]:
     return out
 
 
+def _redact(cmd: list[str]) -> list[str]:
+    """The command as it is safe to print. The value after --token is a runner
+    registration or removal token, and run()'s output lands in update.log —
+    anyone who can read that log within the token's lifetime could register a
+    runner on the repo."""
+    shown = list(cmd)
+    for i, arg in enumerate(shown):
+        if arg == "--token" and i + 1 < len(shown):
+            shown[i + 1] = "***"
+        elif arg.startswith("--token="):
+            shown[i] = "--token=***"
+    return shown
+
+
 def run(cmd: list[str]) -> int:
-    print(f"  $ {' '.join(cmd)}")
+    print(f"  $ {' '.join(_redact(cmd))}")
     return subprocess.call(cmd)
 
 
