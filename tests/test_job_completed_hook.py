@@ -25,7 +25,7 @@ REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / "hooks" / "job-completed.sh"
 SIDECAR_LIB = REPO / "hooks" / "_sidecars.sh"
 BASH = shutil.which("bash")
-REAL_TOOLS = ("env", "dirname")
+REAL_TOOLS = ("env", "dirname", "sleep")
 TRACKING_ID = "github_9b31e0"
 DIRECT_UPDATE = "update-host.sh ran as a child of the hook"
 
@@ -176,7 +176,10 @@ def test_trigger_names_match_the_installed_maintenance_timer():
 
 def test_post_job_grace_is_exempt_from_orphan_cleanup(tmp_path):
     hook, bindir, home, calls = _sandbox(
-        tmp_path, tools=("systemd-inhibit",), fleet_host=False
+        tmp_path,
+        tools=("systemd-inhibit",),
+        bodies={"systemd-inhibit": BLOCK},
+        fleet_host=False,
     )
     r = _run(hook, bindir, home)
     assert r.returncode == 0
@@ -205,6 +208,10 @@ def test_hook_does_not_wait_for_the_grace(tmp_path):
 
 
 GRACE_UNIT = "actions-runner-post-job-grace"
+# A granted inhibitor blocks for the length of its command; a refused one exits
+# at once. Stubs that should count as granted have to block.
+BLOCK = f"{shutil.which('sleep')} 2"
+REFUSED = "warning: post-job sleep inhibitor was refused"
 
 
 def _systemctl(is_active_rc):
@@ -217,7 +224,7 @@ def test_post_job_grace_is_one_refreshed_unit_per_host(tmp_path):
     hook, bindir, home, calls = _sandbox(
         tmp_path,
         tools=("systemd-inhibit", "systemd-run", "systemctl"),
-        bodies={"systemctl": _systemctl(3)},
+        bodies={"systemctl": _systemctl(0)},
         fleet_host=False,
     )
     r = _run(hook, bindir, home)
@@ -263,7 +270,11 @@ def test_grace_falls_back_when_the_user_manager_is_unusable(tmp_path):
     hook, bindir, home, calls = _sandbox(
         tmp_path,
         tools=("systemd-inhibit", "systemd-run", "systemctl"),
-        bodies={"systemd-run": "exit 1", "systemctl": _systemctl(3)},
+        bodies={
+            "systemd-run": "exit 1",
+            "systemctl": _systemctl(3),
+            "systemd-inhibit": BLOCK,
+        },
         fleet_host=False,
     )
     r = _run(hook, bindir, home)
@@ -276,6 +287,38 @@ def test_grace_falls_back_when_the_user_manager_is_unusable(tmp_path):
         time.sleep(0.05)
     [line] = direct
     assert "sleep 900" in line and line.endswith("tracking=UNSET")
+
+
+def test_refused_inhibitor_in_the_unit_is_reported_not_claimed(tmp_path):
+    """The unit starts, but logind refuses the inhibitor and the unit exits at
+    once — seen on a fresh Ubuntu machine without polkit, where the hook still
+    printed "held by". It must warn instead, and not add a fallback holder that
+    would be refused the same way."""
+    hook, bindir, home, calls = _sandbox(
+        tmp_path,
+        tools=("systemd-inhibit", "systemd-run", "systemctl"),
+        bodies={"systemctl": _systemctl(3)},
+        fleet_host=False,
+    )
+    r = _run(hook, bindir, home)
+    assert r.returncode == 0
+    assert REFUSED in r.stderr
+    assert "held by" not in r.stdout
+    time.sleep(0.3)
+    assert not any(ln.startswith("systemd-inhibit ") for ln in _lines(calls))
+
+
+def test_refused_fallback_inhibitor_is_reported_not_claimed(tmp_path):
+    hook, bindir, home, _ = _sandbox(
+        tmp_path,
+        tools=("systemd-inhibit",),
+        bodies={"systemd-inhibit": "exit 1"},
+        fleet_host=False,
+    )
+    r = _run(hook, bindir, home)
+    assert r.returncode == 0
+    assert REFUSED in r.stderr
+    assert "post-job idle-suspend grace" not in r.stdout
 
 
 def test_no_inhibitor_on_this_host_is_silent(tmp_path):
