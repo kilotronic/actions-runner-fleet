@@ -49,15 +49,40 @@ fi
 # the next job to a host that is already on its way down. A short grace keeps it
 # awake across that gap.
 #
-# Started without RUNNER_TRACKING_ID, or the orphan cleanup ends a 900s grace
-# within milliseconds of starting it. It still belongs to the runner's cgroup, so
-# restarting this runner ends it early — that only shortens a grace nobody needs
-# once the runner itself is cycling.
+# One grace per host, not one per job. The inhibitor runs in a fixed-name
+# transient systemd --user unit, and each job end replaces it: stop the unit,
+# start a fresh 900s one. A busy host therefore holds a single inhibitor that
+# keeps being refreshed, instead of a new systemd-inhibit + sleep pair for every
+# job in the last 15 minutes. If two hooks race, systemd refuses to start a unit
+# that is already active, so there is never more than one.
+#
+# The unit also keeps the grace clear of everything that would end it early. It
+# is not a child of this hook — systemd-run does not pass RUNNER_TRACKING_ID into
+# the unit — so the runner's orphan cleanup cannot reach it, and it is not in the
+# runner's cgroup, so restarting this runner leaves it alone.
+#
+# With no usable user manager, fall back to a backgrounded inhibitor with the
+# tracking ID stripped. That one does stack, but it still outlives the job.
+GRACE_UNIT=actions-runner-post-job-grace
 if command -v systemd-inhibit >/dev/null 2>&1; then
-  env -u RUNNER_TRACKING_ID systemd-inhibit --what=sleep --mode=block \
-    --who="actions-runner" --why="post-job grace" \
-    sleep 900 >/dev/null 2>&1 &
-  echo "systemd-inhibit PID $! — post-job idle-suspend grace (900s)"
+  held=""
+  if command -v systemd-run >/dev/null 2>&1; then
+    systemctl --user stop "$GRACE_UNIT.service" >/dev/null 2>&1 || true
+    if systemd-run --user --unit="$GRACE_UNIT" --collect --quiet \
+      systemd-inhibit --what=sleep --mode=block \
+      --who="actions-runner" --why="post-job grace" \
+      sleep 900 >/dev/null 2>&1 \
+      || systemctl --user is-active --quiet "$GRACE_UNIT.service" >/dev/null 2>&1; then
+      held=1
+      echo "post-job idle-suspend grace (900s) — held by $GRACE_UNIT.service"
+    fi
+  fi
+  if [[ -z "$held" ]]; then
+    env -u RUNNER_TRACKING_ID systemd-inhibit --what=sleep --mode=block \
+      --who="actions-runner" --why="post-job grace" \
+      sleep 900 >/dev/null 2>&1 &
+    echo "systemd-inhibit PID $! — post-job idle-suspend grace (900s)"
+  fi
 fi
 
 exit 0
