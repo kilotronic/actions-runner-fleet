@@ -1022,3 +1022,40 @@ class HealthStateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
                 self.assertEqual(apply.load_watchdog_paused(), set())
+
+
+class ReregisterLabelsTest(unittest.TestCase):
+    """The runner applies self-hosted, its OS and its real architecture as
+    default labels itself. reregister used to pass them hardcoded, tagging every
+    Linux runner X64 — a wrong custom label on an ARM machine."""
+
+    def _argv(self, extra_labels):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = Path(tmpdir) / "dotfiles-jl-1"
+            d.mkdir()
+            (d / "config.sh").touch()
+            with (
+                mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
+                mock.patch.object(apply, "mint_token", return_value="tok"),
+                mock.patch.object(apply, "run", return_value=0) as run_cmd,
+                mock.patch.object(apply, "_svc_restart", return_value=True),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                apply.reregister(
+                    "owner/repo", "dotfiles-jl-1", "host-a", extra_labels=extra_labels
+                )
+            return run_cmd.call_args[0][0]
+
+    def test_no_os_or_arch_labels_are_passed(self):
+        argv = self._argv(())
+        self.assertNotIn("--labels", argv)
+        self.assertFalse(
+            any(
+                "self-hosted" in a or a in ("X64", "ARM64", "Linux", "macOS")
+                for a in argv
+            )
+        )
+
+    def test_extra_labels_are_the_only_custom_labels(self):
+        argv = self._argv(("bigmem",))
+        self.assertEqual(argv[argv.index("--labels") + 1], "bigmem")

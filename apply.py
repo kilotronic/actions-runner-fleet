@@ -533,9 +533,6 @@ def reregister(
         return False
     for f in (".runner", ".credentials", ".credentials_rsaparams", ".runner_migrated"):
         (d / f).unlink(missing_ok=True)
-    labels = "self-hosted,macOS,ARM64" if IS_MAC else "self-hosted,Linux,X64"
-    if extra_labels:
-        labels += "," + ",".join(extra_labels)
     cmd = [
         str(d / "config.sh"),
         "--url",
@@ -544,13 +541,17 @@ def reregister(
         token,
         "--name",
         f"{host}-{dirname}",
-        "--labels",
-        labels,
         "--work",
         "_work",
         "--replace",
         "--unattended",
     ]
+    # No OS or architecture labels: the runner applies self-hosted, its OS and
+    # its real architecture as default labels on its own. Hardcoding them tagged
+    # every Linux runner X64 — a wrong custom label on an ARM machine. Only the
+    # host's extra labels from runners.toml are custom.
+    if extra_labels:
+        cmd += ["--labels", ",".join(extra_labels)]
     if work_root:
         cmd.append("--disableupdate")
     rc = run(cmd)
