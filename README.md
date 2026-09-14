@@ -90,6 +90,19 @@ here.
 
 ## Quick start
 
+**Before you start**, you need `git` (to clone this repo), Python 3.11+, and the
+GitHub CLI `gh` — installed and authenticated before the installer runs, since
+it registers runners through `gh`.
+
+- **macOS:** Homebrew, then `brew install gh`. The installer brew-installs
+  Python if it is missing.
+- **Debian/Ubuntu:** a fresh machine has neither `git` nor `gh`, so start with
+  `sudo apt-get install -y git gh`. The installer installs Docker, Python and
+  everything else it needs.
+
+Runners install on macOS (Apple silicon or Intel) and on Linux (x64, arm64 or
+32-bit arm); the installer picks the matching runner build.
+
 1. Copy `runners.toml.example` to `~/.config/actions-runner/runners.toml` and
    edit host keys (`hostname -s`) and `owner/repo` counts.
 2. `gh auth login` (on macOS over SSH, store the token in `hosts.yml`, not the

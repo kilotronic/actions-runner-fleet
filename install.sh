@@ -22,10 +22,16 @@ set -euo pipefail
 # ── Configuration ────────────────────────────────────────────────────────────
 
 RUNNER_VERSION="2.336.0"
-RUNNER_ARCH="osx-arm64"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The runner build must match this machine's architecture (see _runner_arch.sh).
+# shellcheck source=_runner_arch.sh
+. "$SCRIPT_DIR/_runner_arch.sh"
+RUNNER_ARCH="$(runner_build osx)" || {
+  echo "error: the GitHub Actions runner has no macOS build for $(uname -m)" >&2
+  exit 1
+}
 RUNNER_TARBALL="actions-runner-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz"
 RUNNER_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TARBALL}"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -271,11 +277,13 @@ ENV
     UPDATE_FLAGS+=(--disableupdate)
   fi
   info "  Configuring..."
+  # No --labels: the runner applies self-hosted, its OS and its real
+  # architecture as default labels on its own. Passing them could only ever
+  # add a wrong one; host-specific extras come from runners.toml via apply.py.
   "$RUNNER_DIR/config.sh" \
     --url "https://github.com/${REPO}" \
     --token "$REG_TOKEN" \
     --name "$RUNNER_NAME" \
-    --labels "self-hosted,macOS,ARM64" \
     --work "_work" \
     --replace \
     --unattended \

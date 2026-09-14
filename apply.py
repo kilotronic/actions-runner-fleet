@@ -354,8 +354,22 @@ def discover_installed_dirs(repo_name: str) -> list[str]:
     return out
 
 
+def _redact(cmd: list[str]) -> list[str]:
+    """The command as it is safe to print. The value after --token is a runner
+    registration or removal token, and run()'s output lands in update.log —
+    anyone who can read that log within the token's lifetime could register a
+    runner on the repo."""
+    shown = list(cmd)
+    for i, arg in enumerate(shown):
+        if arg == "--token" and i + 1 < len(shown):
+            shown[i + 1] = "***"
+        elif arg.startswith("--token="):
+            shown[i] = "--token=***"
+    return shown
+
+
 def run(cmd: list[str]) -> int:
-    print(f"  $ {' '.join(cmd)}")
+    print(f"  $ {' '.join(_redact(cmd))}")
     return subprocess.call(cmd)
 
 
@@ -533,9 +547,6 @@ def reregister(
         return False
     for f in (".runner", ".credentials", ".credentials_rsaparams", ".runner_migrated"):
         (d / f).unlink(missing_ok=True)
-    labels = "self-hosted,macOS,ARM64" if IS_MAC else "self-hosted,Linux,X64"
-    if extra_labels:
-        labels += "," + ",".join(extra_labels)
     cmd = [
         str(d / "config.sh"),
         "--url",
@@ -544,13 +555,17 @@ def reregister(
         token,
         "--name",
         f"{host}-{dirname}",
-        "--labels",
-        labels,
         "--work",
         "_work",
         "--replace",
         "--unattended",
     ]
+    # No OS or architecture labels: the runner applies self-hosted, its OS and
+    # its real architecture as default labels on its own. Hardcoding them tagged
+    # every Linux runner X64 — a wrong custom label on an ARM machine. Only the
+    # host's extra labels from runners.toml are custom.
+    if extra_labels:
+        cmd += ["--labels", ",".join(extra_labels)]
     if work_root:
         cmd.append("--disableupdate")
     rc = run(cmd)
