@@ -109,13 +109,16 @@ fi
 case "$(uname -s)" in
   Linux)
     # OPTIONAL, operator-supplied: a polkit rule letting the runner user take
-    # block:sleep inhibitors. Most current distributions already permit this for
-    # any local user — measured on Debian 13, where the hook's inhibitor is
-    # granted with no rule installed — so this kit deliberately does NOT ship
-    # one: a privileged policy file that is unnecessary almost everywhere is not
-    # a good default. Drop your own at the path below if a host's polkit denies
-    # the inhibitor (the hook logs a warning when that happens); a missing file
-    # is a silent no-op. sudo -n: hosts that do not grant passwordless sudo warn
+    # block:sleep inhibitors. polkit's default grants inhibit-block-sleep only to
+    # processes in an active login session, and the runner service is not one, so
+    # without a rule the hooks' inhibitors are refused unless something else
+    # grants them (an earlier note here said the default allowed it; the host it
+    # was measured on turned out to have this rule installed). This kit
+    # deliberately does NOT ship the rule: it is a privileged policy change, and a
+    # machine that never suspends does not need it. README "Sleep inhibitors
+    # (Linux)" has it; a copy at the path below is kept installed. The hooks warn
+    # when the inhibitor is refused; a missing file is a silent no-op. sudo -n:
+    # hosts that do not grant passwordless sudo warn
     # rather than hang a hook-triggered update. Privileged host state, not
     # runner config, so it stays here rather than moving into apply.py.
     POLKIT_RULE=polkit/49-actions-runner-inhibit.rules
