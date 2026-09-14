@@ -204,6 +204,80 @@ def test_hook_does_not_wait_for_the_grace(tmp_path):
     assert _wait_for(calls, "systemd-inhibit")
 
 
+GRACE_UNIT = "actions-runner-post-job-grace"
+
+
+def _systemctl(is_active_rc):
+    return f'case "$*" in *is-active*) exit {is_active_rc};; esac'
+
+
+def test_post_job_grace_is_one_refreshed_unit_per_host(tmp_path):
+    """Each job end replaces the host's grace unit rather than adding another
+    systemd-inhibit + sleep pair: stop the fixed-name unit, start a fresh one."""
+    hook, bindir, home, calls = _sandbox(
+        tmp_path,
+        tools=("systemd-inhibit", "systemd-run", "systemctl"),
+        bodies={"systemctl": _systemctl(3)},
+        fleet_host=False,
+    )
+    r = _run(hook, bindir, home)
+    assert (r.returncode, r.stderr) == (0, "")
+    assert f"held by {GRACE_UNIT}.service" in r.stdout
+    lines = _lines(calls)
+    stop = [
+        i
+        for i, ln in enumerate(lines)
+        if ln.startswith(f"systemctl --user stop {GRACE_UNIT}.service ")
+    ]
+    start = [
+        i
+        for i, ln in enumerate(lines)
+        if ln.startswith(
+            f"systemd-run --user --unit={GRACE_UNIT} --collect --quiet "
+            "systemd-inhibit --what=sleep --mode=block --who=actions-runner "
+            "--why=post-job grace sleep 900 "
+        )
+    ]
+    assert stop and start and stop[0] < start[0], lines
+    time.sleep(0.3)
+    assert not any(ln.startswith("systemd-inhibit ") for ln in _lines(calls))
+
+
+def test_a_racing_hook_does_not_add_a_second_grace(tmp_path):
+    """Another hook started the unit between our stop and our start: systemd
+    refuses the duplicate, the unit is active, and no fallback holder is added."""
+    hook, bindir, home, calls = _sandbox(
+        tmp_path,
+        tools=("systemd-inhibit", "systemd-run", "systemctl"),
+        bodies={"systemd-run": "exit 1", "systemctl": _systemctl(0)},
+        fleet_host=False,
+    )
+    r = _run(hook, bindir, home)
+    assert (r.returncode, r.stderr) == (0, "")
+    assert f"held by {GRACE_UNIT}.service" in r.stdout
+    time.sleep(0.3)
+    assert not any(ln.startswith("systemd-inhibit ") for ln in _lines(calls))
+
+
+def test_grace_falls_back_when_the_user_manager_is_unusable(tmp_path):
+    hook, bindir, home, calls = _sandbox(
+        tmp_path,
+        tools=("systemd-inhibit", "systemd-run", "systemctl"),
+        bodies={"systemd-run": "exit 1", "systemctl": _systemctl(3)},
+        fleet_host=False,
+    )
+    r = _run(hook, bindir, home)
+    assert (r.returncode, r.stderr) == (0, "")
+    assert "post-job idle-suspend grace (900s)" in r.stdout
+    deadline = time.monotonic() + 3
+    direct = []
+    while time.monotonic() < deadline and not direct:
+        direct = [ln for ln in _lines(calls) if ln.startswith("systemd-inhibit ")]
+        time.sleep(0.05)
+    [line] = direct
+    assert "sleep 900" in line and line.endswith("tracking=UNSET")
+
+
 def test_no_inhibitor_on_this_host_is_silent(tmp_path):
     hook, bindir, home, _ = _sandbox(tmp_path, fleet_host=False)
     r = _run(hook, bindir, home)
