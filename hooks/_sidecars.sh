@@ -20,7 +20,7 @@
 #
 # Usage:  source "$HOOKS/_sidecars.sh"; run_sidecars started
 
-SIDECARS=(log-job-env.sh standup-presence.sh)
+SIDECARS=(log-job-env.sh standup-presence.sh play-sound.sh)
 
 # Best-effort by contract: each sidecar is `|| true` with its output discarded.
 # A diagnostic that can fail a job is worse than no diagnostic at all, and these

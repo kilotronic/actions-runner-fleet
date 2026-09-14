@@ -36,6 +36,32 @@ container_runtime = "orbstack"  # opt-in host-lifetime OrbStack ensure
 the forwarder down. ollama's API is unauthenticated; restrict who can connect
 with a tailnet ACL.
 
+### Job sounds
+
+A host can chime when a job starts and ends. Put the files in a `sounds/`
+directory next to `runners.toml`:
+
+```
+~/.config/actions-runner/sounds/job-start.aiff   # played when a job starts
+~/.config/actions-runner/sounds/job-end.aiff     # played when a job ends
+```
+
+The same `sounds/` directory is found under `$XDG_CONFIG_HOME/actions-runner/`,
+or beside `$ACTIONS_RUNNER_CONFIG`, following the inventory lookup above.
+**Nothing plays by default**, and this repo ships no sounds: an absent file is
+silence, and each event is independent. Keep the files with your inventory.
+
+Players are `afplay` on macOS, and `pw-play`, `paplay` or `ffplay` on Linux, in
+that order. `aplay` is never used — it cannot decode AIFF and plays files it
+does not recognise as raw noise. On Linux the runner's systemd `--user` service
+needs a reachable PipeWire or PulseAudio session (a lingering user with
+`XDG_RUNTIME_DIR` set); without one the player fails quietly and the job is
+unaffected.
+
+The player is launched outside the runner's orphan-process cleanup. Without
+that, a sound started from the job-completed hook is killed within milliseconds,
+before it plays.
+
 ## Tools
 
 | Tool                              | What it does                                                                  |
