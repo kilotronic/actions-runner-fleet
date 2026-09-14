@@ -69,7 +69,7 @@ before it plays.
 | `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove), then restart hung listeners |
 | `load-watchdog.py`                | Pause idle listeners when per-core load is high; resume when it drops         |
 | `lid-watchdog.py`                 | Pause idle listeners on a laptop whose lid is closed (macOS; no-op elsewhere) |
-| `maintenance-timer.py`            | Every 2h: `update-host.sh` so idle hosts still self-heal                      |
+| `maintenance-timer.py`            | Every 2h and after each job: `update-host.sh`, so hosts self-heal             |
 | `runner_timers.py`                | Shared launchd / systemd `--user` installer                                   |
 | `orbstack-watchdog.py`            | Installed only when `container_runtime = "orbstack"`                          |
 | `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off   |
@@ -93,7 +93,7 @@ here.
 1. Copy `runners.toml.example` to `~/.config/actions-runner/runners.toml` and
    edit host keys (`hostname -s`) and `owner/repo` counts.
 2. `gh auth login` (on macOS over SSH, store the token in `hosts.yml`, not the
-   login keychain).
+   login keychain — see [`docs/gh-auth-over-ssh.md`](docs/gh-auth-over-ssh.md)).
 3. `./install.sh owner/repo` or `./install-linux.sh owner/repo`
 4. `./apply.py --dry-run` then `./apply.py`
 
