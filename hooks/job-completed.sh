@@ -64,25 +64,49 @@ fi
 # With no usable user manager, fall back to a backgrounded inhibitor with the
 # tracking ID stripped. That one does stack, but it still outlives the job.
 GRACE_UNIT=actions-runner-post-job-grace
+grace_refused() {
+  echo "warning: post-job sleep inhibitor was refused; this box may suspend between jobs" >&2
+}
 if command -v systemd-inhibit >/dev/null 2>&1; then
-  held=""
+  grace=""
   if command -v systemd-run >/dev/null 2>&1; then
     systemctl --user stop "$GRACE_UNIT.service" >/dev/null 2>&1 || true
     if systemd-run --user --unit="$GRACE_UNIT" --collect --quiet \
       systemd-inhibit --what=sleep --mode=block \
       --who="actions-runner" --why="post-job grace" \
-      sleep 900 >/dev/null 2>&1 \
-      || systemctl --user is-active --quiet "$GRACE_UNIT.service" >/dev/null 2>&1; then
-      held=1
-      echo "post-job idle-suspend grace (900s) — held by $GRACE_UNIT.service"
+      sleep 900 >/dev/null 2>&1; then
+      # systemd-run only reports that the unit started. A refused inhibitor
+      # (logind says "Access denied", e.g. where polkit is absent) exits within
+      # milliseconds, and without this check the hook reported a grace that did
+      # not exist. The same check job-started.sh makes.
+      sleep 0.2
+      if systemctl --user is-active --quiet "$GRACE_UNIT.service" >/dev/null 2>&1; then
+        grace=held
+      else
+        grace=refused
+      fi
+    elif systemctl --user is-active --quiet "$GRACE_UNIT.service" >/dev/null 2>&1; then
+      grace=held # another job-completed hook started it first
     fi
   fi
-  if [[ -z "$held" ]]; then
-    env -u RUNNER_TRACKING_ID systemd-inhibit --what=sleep --mode=block \
-      --who="actions-runner" --why="post-job grace" \
-      sleep 900 >/dev/null 2>&1 &
-    echo "systemd-inhibit PID $! — post-job idle-suspend grace (900s)"
-  fi
+  case "$grace" in
+    held) echo "post-job idle-suspend grace (900s) — held by $GRACE_UNIT.service" ;;
+    # Refused in the unit means refused for this user: the fallback below asks
+    # logind for the same inhibitor and would be refused the same way.
+    refused) grace_refused ;;
+    *)
+      env -u RUNNER_TRACKING_ID systemd-inhibit --what=sleep --mode=block \
+        --who="actions-runner" --why="post-job grace" \
+        sleep 900 >/dev/null 2>&1 &
+      grace_pid=$!
+      sleep 0.2
+      if kill -0 "$grace_pid" 2>/dev/null; then
+        echo "systemd-inhibit PID $grace_pid — post-job idle-suspend grace (900s)"
+      else
+        grace_refused
+      fi
+      ;;
+  esac
 fi
 
 exit 0

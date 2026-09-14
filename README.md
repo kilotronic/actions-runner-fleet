@@ -129,6 +129,44 @@ host's timers and the kit's files under `~/actions-runner` — hooks, caches and
 state. Logs are kept, and the inventory in `~/.config/actions-runner` (including
 any job sounds) is never touched.
 
+## Sleep inhibitors (Linux)
+
+On Linux the job hooks hold a logind sleep inhibitor while a job runs, and for 15
+minutes after it, so an idle-suspend policy cannot suspend the machine mid-job
+or between jobs. If a job log shows
+
+```
+warning: sleep inhibitor was refused; this box may suspend mid-job
+warning: post-job sleep inhibitor was refused; this box may suspend between jobs
+```
+
+the runner user is not allowed to take one. polkit's default policy grants sleep
+inhibitors only to processes in an active login session, and the runner service
+runs outside any session — so it is refused whenever the runner user has no
+active session, as on a headless machine nobody is logged in to. On a machine
+that never suspends, the warning is harmless.
+
+Otherwise, allow the runner user to take sleep inhibitors — and nothing else —
+with a polkit rule. Run this as the runner user; it installs polkit if the
+machine does not have it, and writes the rule for the current `$USER`:
+
+```sh
+sudo apt-get install -y polkitd
+sudo tee /etc/polkit-1/rules.d/49-actions-runner-inhibit.rules >/dev/null <<EOF
+polkit.addRule(function (action, subject) {
+  if ((action.id == "org.freedesktop.login1.inhibit-block-sleep" ||
+       action.id == "org.freedesktop.login1.inhibit-block-idle") &&
+      subject.user == "$USER") {
+    return polkit.Result.YES;
+  }
+});
+EOF
+```
+
+polkit reads the rule immediately; the next job's hooks hold their inhibitors.
+This kit does not install the rule for you: it is a privileged policy change, and
+many machines do not need it.
+
 ## Hung listeners
 
 Every restart mechanism here keys off process *exit*: the launchd plist's
