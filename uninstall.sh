@@ -6,7 +6,9 @@
 #   ./uninstall.sh acme/app
 #
 # Finds all worker directories matching ~/actions-runner/<repo>-<N>/,
-# stops their launchd agents, deregisters from GitHub, and removes files.
+# stops their launchd agents, deregisters from GitHub, and removes files. When
+# the last runner on the host is gone, also removes the host's timers and the
+# kit's files (see _teardown.sh).
 
 set -euo pipefail
 
@@ -24,6 +26,7 @@ fi
 REPO="$1"
 REPO_NAME="${REPO##*/}"
 BASE_DIR="$HOME/actions-runner"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REMOVED=0
 
 # Find all worker directories (repo-1, repo-2, ...)
@@ -57,19 +60,10 @@ for RUNNER_DIR in "$BASE_DIR/${REPO_NAME}"-[0-9]*; do
   REMOVED=$((REMOVED + 1))
 done
 
-# Clean up cache and parent only if no other runner dirs remain.
-# .shared-externals-* is shared by every runner on the host (see install.sh), so
-# it must be excluded from the "is anything left" count — otherwise it looks
-# like a surviving runner and the cleanup never fires — and removed only once
-# the last runner is gone. Never remove it while other runners remain: their
-# externals/ symlinks point at it, across repos.
-REMAINING=$(find "$BASE_DIR" -maxdepth 1 -mindepth 1 -type d \
-  ! -name '.cache' ! -name '.shared-externals-*' 2>/dev/null | wc -l)
-if [[ "$REMAINING" -eq 0 ]]; then
-  rm -rf "$BASE_DIR/.cache" 2>/dev/null || true
-  rm -rf "$BASE_DIR"/.shared-externals-* 2>/dev/null || true
-  rmdir "$BASE_DIR" 2>/dev/null || true
-fi
-
 echo ""
 echo "Removed ${REMOVED} runner(s) for ${REPO}."
+
+# Host-wide cleanup once the last runner is gone: timers, then the kit's files.
+# shellcheck source=_teardown.sh
+. "$SCRIPT_DIR/_teardown.sh"
+teardown_host "$SCRIPT_DIR" "$BASE_DIR" "$REPO"

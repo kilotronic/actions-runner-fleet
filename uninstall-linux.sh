@@ -7,6 +7,8 @@
 #
 # Finds all worker directories matching ~/actions-runner/<repo>-<N>/,
 # stops their systemd --user units, deregisters from GitHub, and removes files.
+# When the last runner on the host is gone, also removes the host's timers and
+# the kit's files (see _teardown.sh).
 
 set -euo pipefail
 
@@ -24,6 +26,7 @@ fi
 REPO="$1"
 REPO_NAME="${REPO##*/}"
 BASE_DIR="$HOME/actions-runner"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 REMOVED=0
 
@@ -58,12 +61,10 @@ done
 
 systemctl --user daemon-reload 2>/dev/null || true
 
-# Clean up cache and parent only if no other runner dirs remain
-REMAINING=$(find "$BASE_DIR" -maxdepth 1 -mindepth 1 -type d ! -name '.cache' ! -name 'hooks' 2>/dev/null | wc -l)
-if [[ "$REMAINING" -eq 0 ]]; then
-  rm -rf "$BASE_DIR/.cache" "$BASE_DIR/hooks" 2>/dev/null || true
-  rmdir "$BASE_DIR" 2>/dev/null || true
-fi
-
 echo ""
 echo "Removed ${REMOVED} runner(s) for ${REPO}."
+
+# Host-wide cleanup once the last runner is gone: timers, then the kit's files.
+# shellcheck source=_teardown.sh
+. "$SCRIPT_DIR/_teardown.sh"
+teardown_host "$SCRIPT_DIR" "$BASE_DIR" "$REPO"
