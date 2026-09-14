@@ -101,6 +101,21 @@ Disable auto-update with `touch ~/actions-runner/.no-auto-update`. Disable
 destructive removals with `touch ~/actions-runner/.no-auto-prune`. Disable the
 hung-listener sweep with `touch ~/actions-runner/.no-runner-health`.
 
+## Removing runners
+
+To retire a repo's runners on a host, set its count to `0` in `runners.toml` (or
+delete the entry). The next update removes them, idle runners only.
+
+`./uninstall.sh owner/repo` (or `./uninstall-linux.sh owner/repo`) removes a
+repo's runners immediately, but it does not edit the inventory: while the repo is
+still listed for the host, the maintenance timer reinstalls it on its next update.
+The uninstaller warns when that is about to happen.
+
+When the last runner on a host is removed, the uninstaller also removes the
+host's timers and the kit's files under `~/actions-runner` — hooks, caches and
+state. Logs are kept, and the inventory in `~/.config/actions-runner` (including
+any job sounds) is never touched.
+
 ## Hung listeners
 
 Every restart mechanism here keys off process *exit*: the launchd plist's
