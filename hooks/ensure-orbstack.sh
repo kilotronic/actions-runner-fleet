@@ -92,6 +92,9 @@ _timed() {
 # production sets them.
 _PROBE_FAST="${ORB_PROBE_FAST:-10}"
 _PROBE_SLOW="${ORB_PROBE_SLOW:-25}"
+# `orb status` gets its own box: it can hang on the same wedged host<->VM
+# transport `docker info` does, so it is never called unguarded.
+_PROBE_ORB="${ORB_PROBE_ORB:-10}"
 _PATIENCE_DELAY="${ORB_PATIENCE_DELAY:-30}"
 _PATIENCE_PROBE="${ORB_PATIENCE_PROBE:-60}"
 
@@ -212,9 +215,18 @@ _breaker_record() {
 _daemon_cleanly_down() {
   [[ ! -S "$HOME/.orbstack/run/docker.sock" ]] && return 0
   if [[ -x "$ORB" ]]; then
-    local st
-    st="$(_timed 10 "$ORB" status 2>/dev/null || true)"
-    [[ "$st" != "Running" ]] && return 0
+    local st rc=0
+    st="$(_timed "$_PROBE_ORB" "$ORB" status 2>/dev/null)" || rc=$?
+    # Only a probe that RETURNED may be read as an answer. `orb status` can
+    # hang on the same wedged transport `docker info` does, and a killed probe
+    # yields an empty `st` that is indistinguishable from a real "Stopped" —
+    # so testing the string alone declared a merely-slow box "cleanly down".
+    # The bare `orb start` that followed then replied "OrbStack is already
+    # running", recovered nothing, and left the job to wait out
+    # _wait_docker_ready. Falling through on a timeout instead routes to the
+    # wedged path, which is the conservative direction: it stops and restarts
+    # rather than assuming nothing is running.
+    ((rc == 0)) && [[ "$st" != "Running" ]] && return 0
   fi
   return 1
 }
@@ -288,17 +300,38 @@ _acquire_recovery_lock() {
 }
 _release_recovery_lock() { rmdir "$_RECOVERY_LOCK" 2>/dev/null || true; }
 
-# Wait up to 60s for the daemon to answer, reporting the outcome loudly.
+# Wait for the daemon to answer after a start/restart, reporting the outcome
+# loudly.
+#
+# The budget is WALL CLOCK, and that is the whole point. This used to read
+# `for _ in $(seq 1 60); do _docker_ok && break; sleep 1; done`, which looks
+# like 60 seconds and is not: `_docker_ok` is itself `_timed $_PROBE_FAST`, so
+# against a daemon that never answers every iteration costs 10s + 1s and the
+# real ceiling was ~660s. A job blocked in the job-started hook wore all of it
+# in silence, and the message then reported "60s" — which is why this stayed
+# invisible in job logs for so long. Measured on a memory-tight host: the hook
+# ran for 20m24s before the job's first step, and the container step that
+# follows failed anyway.
+#
+# The default is deliberately more than 60s: this only ever runs just after an
+# `orb start`, and a genuine cold start on a slow or memory-tight host takes
+# longer than that. It is bounded, and the failure message now reports what
+# actually elapsed rather than a number from the source.
+_READY_BUDGET="${ORB_READY_BUDGET:-120}"
 _wait_docker_ready() {
-  for _ in $(seq 1 60); do
-    _docker_ok && break
+  local start elapsed
+  start="$(date +%s)"
+  while :; do
+    if _docker_ok; then
+      echo "container runtime is running"
+      return 0
+    fi
+    elapsed=$(($(date +%s) - start))
+    ((elapsed >= _READY_BUDGET)) && break
     sleep 1
   done
-  if _docker_ok; then
-    echo "container runtime is running"
-  else
-    echo "warning: OrbStack did not become ready within 60s; container steps may fail"
-  fi
+  elapsed=$(($(date +%s) - start))
+  echo "warning: OrbStack did not become ready within ${_READY_BUDGET}s (gave up after ${elapsed}s); container steps may fail"
 }
 
 _orb_start_only() {

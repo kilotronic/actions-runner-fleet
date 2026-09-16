@@ -56,6 +56,23 @@ fi
 # refuses the inhibitor, must not fail the job. The warning is on stderr so an
 # unexpected denial is visible in the job log instead of silently no-op'ing —
 # a silent no-op here is what let this go unnoticed through many jobs.
+#
+# macOS needs its own branch, and went without one until 2026-09-16. Gating the
+# whole block on `systemd-inhibit` meant every Darwin host fell straight through
+# it with nothing held — laptops included. The symptom is the one described
+# above, and it is easy to misread: in a sample of 120 CI runs, eight jobs
+# finished with EVERY step green and the job still marked failed, and on one
+# host the job's completed_at preceded its own last step's by 2-4 minutes —
+# the runner reporting into a job the service had already retired while the
+# machine slept.
+#
+# `caffeinate -w` is the direct analogue of the `tail --pid` trick: it holds the
+# assertion until that pid exits, so the inhibitor's lifetime is the worker's
+# and the runner reaps it as an orphan exactly like the Linux pair. `-i` blocks
+# idle sleep and `-s` blocks system sleep while on AC; display sleep is left
+# alone on purpose, since keeping a laptop's panel lit all night is cost with no
+# benefit. A closed lid still forces sleep regardless — that is lid-watchdog.py's
+# problem, not this one.
 if command -v systemd-inhibit >/dev/null 2>&1; then
   WORKER_PID="${PPID:-$$}"
   systemd-inhibit --what=sleep --mode=block \
@@ -68,6 +85,18 @@ if command -v systemd-inhibit >/dev/null 2>&1; then
   sleep 0.2
   if kill -0 "$INHIBIT_PID" 2>/dev/null; then
     echo "systemd-inhibit PID $INHIBIT_PID — blocking idle-suspend for job worker $WORKER_PID"
+  else
+    echo "warning: sleep inhibitor was refused; this box may suspend mid-job" >&2
+  fi
+elif command -v caffeinate >/dev/null 2>&1; then
+  WORKER_PID="${PPID:-$$}"
+  caffeinate -i -s -w "$WORKER_PID" >/dev/null 2>&1 &
+  INHIBIT_PID=$!
+  # Same "did the fork actually take" check as the systemd branch: caffeinate
+  # exits immediately if $WORKER_PID is already gone or unwaitable.
+  sleep 0.2
+  if kill -0 "$INHIBIT_PID" 2>/dev/null; then
+    echo "caffeinate PID $INHIBIT_PID — blocking idle-sleep for job worker $WORKER_PID"
   else
     echo "warning: sleep inhibitor was refused; this box may suspend mid-job" >&2
   fi

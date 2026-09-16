@@ -8,7 +8,9 @@
 #
 #   inhibitor granted   -> reports the PID, and the inhibitor really is held
 #   inhibitor refused   -> warns on stderr, still exits 0 (never fails a job)
-#   inhibitor absent    -> silent, exits 0 (macOS and non-systemd hosts)
+#   inhibitor absent    -> silent, exits 0 (no systemd-inhibit AND no caffeinate)
+#   inhibitor on macOS  -> caffeinate is reached for exactly as systemd-inhibit
+#                          is on Linux, granted and refused alike
 #   inhibitor lifetime  -> dies with the job worker, not with the hook
 #   orbstack opted in   -> ensure-orbstack.sh --full is called
 #   orbstack not opted  -> it is NOT called
@@ -51,6 +53,8 @@ FAILURES=0
 #   grant  - a stub that blocks like the real one (records that it was called)
 #   refuse - a stub that exits 1 immediately (polkit denial)
 #   absent - no systemd-inhibit on PATH at all
+#   caffeinate        - macOS: no systemd-inhibit, caffeinate blocks like the real one
+#   caffeinate-refuse - macOS: caffeinate exits 1 immediately
 # sidecar-mode is one of:
 #   stub   - (default) every SIDECARS entry records "<name> <event>" when run
 #   broken - every entry exits 1 without recording (a sidecar that is failing)
@@ -115,6 +119,21 @@ EOS
     refuse)
       printf '#!/usr/bin/env bash\nexit 1\n' >"$sb/bin/systemd-inhibit"
       chmod +x "$sb/bin/systemd-inhibit"
+      ;;
+    caffeinate)
+      cat >"$sb/bin/caffeinate" <<EOS
+#!/usr/bin/env bash
+echo "\$@" >> "$sb/state/inhibit-args"
+# The real caffeinate -w blocks until the watched pid exits. exec sleep stands
+# in for that, so the hook's liveness check sees an assertion actually held
+# rather than a stub that returned.
+exec sleep 30
+EOS
+      chmod +x "$sb/bin/caffeinate"
+      ;;
+    caffeinate-refuse)
+      printf '#!/usr/bin/env bash\nexit 1\n' >"$sb/bin/caffeinate"
+      chmod +x "$sb/bin/caffeinate"
       ;;
     absent) : ;;
   esac
@@ -182,12 +201,36 @@ _run "$SB"
 _assert refused "grep -q 'refused' $SB/err" "warns on stderr"
 _assert refused "[[ \$(cat $SB/rc) == 0 ]]" "STILL exits 0 — a denial must not fail the job"
 
-# 4. Absent (macOS / non-systemd): silent, and still exits 0.
+# 4. Absent (no systemd-inhibit AND no caffeinate): silent, and still exits 0.
+#    NB this used to be labelled "macOS", which was the bug: the block was
+#    gated on systemd-inhibit alone, so every Mac took this path and ran with
+#    no inhibitor at all. macOS is scenarios 4a/4b below; this is now only a
+#    non-systemd, non-Darwin host.
 SB=$(_sandbox absent none)
 _run "$SB"
 _assert absent "! grep -q 'systemd-inhibit' $SB/out" "no inhibitor line"
 _assert absent "! [[ -s $SB/err ]]" "no warning — absence is not an error"
 _assert absent "[[ \$(cat $SB/rc) == 0 ]]" "exits 0"
+
+# 4a. macOS grants it: caffeinate is the platform's inhibitor, and the hook
+#     must reach for it exactly as it reaches for systemd-inhibit on Linux.
+#     Before 2026-09-16 there was no such branch, so this scenario was
+#     indistinguishable from 4 — a Mac ran every job with nothing held.
+SB=$(_sandbox caffeinate none)
+_run "$SB"
+_assert mac-granted "grep -q 'caffeinate PID' $SB/out" "reports the assertion it holds"
+_assert mac-granted "grep -q -- '-w' $SB/state/inhibit-args" "ties lifetime to a pid, not to the hook"
+_assert mac-granted "grep -q -- '-i' $SB/state/inhibit-args" "blocks idle sleep"
+_assert mac-granted "grep -q -- '-s' $SB/state/inhibit-args" "blocks system sleep on AC"
+_assert mac-granted "! [[ -s $SB/err ]]" "says nothing on stderr"
+_assert mac-granted "[[ \$(cat $SB/rc) == 0 ]]" "exits 0"
+
+# 4b. macOS refuses it: same contract as the polkit denial in scenario 3 —
+#     warn on stderr, never fail the job.
+SB=$(_sandbox caffeinate-refuse none)
+_run "$SB"
+_assert mac-refused "grep -q 'refused' $SB/err" "warns on stderr"
+_assert mac-refused "[[ \$(cat $SB/rc) == 0 ]]" "STILL exits 0 — a denial must not fail the job"
 
 # 5. OrbStack opt-in still dispatches (the behaviour-neutrality regression).
 SB=$(_sandbox grant orbstack)
