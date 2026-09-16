@@ -26,6 +26,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The runner build must match this machine's architecture (see _runner_arch.sh).
 # shellcheck source=_runner_arch.sh
 . "$SCRIPT_DIR/_runner_arch.sh"
+# shellcheck source=_render.sh
+. "$SCRIPT_DIR/_render.sh"
 RUNNER_ARCH="$(runner_build osx)" || {
   echo "error: the GitHub Actions runner has no macOS build for $(uname -m)" >&2
   exit 1
@@ -301,63 +303,8 @@ ENV
   mkdir -p "$RUNNER_DIR/logs"
   mkdir -p "$(dirname "$PLIST_PATH")"
 
-  cat >"$PLIST_PATH" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${PLIST_LABEL}</string>
-
-    <key>WorkingDirectory</key>
-    <string>${RUNNER_DIR}</string>
-
-    <key>ProgramArguments</key>
-    <array>
-        <string>${RUNNER_DIR}/run.sh</string>
-    </array>
-
-    <key>RunAtLoad</key>
-    <true/>
-
-    <!-- The runner's own self-update (GitHub bumping the minimum agent
-         version) shuts run.sh down with a clean UserCancelled exit, not a
-         crash. SuccessfulExit=false left that clean exit unrestarted —
-         observed 2026-07-16: three fresh registrations went permanently
-         offline right after their first forced self-update, needing a
-         manual launchctl kickstart -k. This is a long-running listener
-         service; it should always come back regardless of exit status. -->
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <true/>
-    </dict>
-
-    <key>ThrottleInterval</key>
-    <integer>5</integer>
-
-    <key>StandardOutPath</key>
-    <string>${RUNNER_DIR}/logs/stdout.log</string>
-
-    <key>StandardErrorPath</key>
-    <string>${RUNNER_DIR}/logs/stderr.log</string>
-
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>${HOME}/.orbstack/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <key>HOMEBREW_PREFIX</key>
-        <string>/opt/homebrew</string>
-        <key>ACTIONS_RUNNER_HOOK_JOB_STARTED</key>
-        <string>${RUNNER_DIR}/hooks/job-started.sh</string>
-        <key>RUNNER_TOOL_CACHE</key>
-        <string>${BASE_DIR}/.shared-tool-cache</string>
-        <key>AGENT_TOOLSDIRECTORY</key>
-        <string>${BASE_DIR}/.shared-tool-cache</string>
-    </dict>
-</dict>
-</plist>
-PLIST
+  render_template "$SCRIPT_DIR/templates/com.github.actions-runner.plist.in" \
+    LABEL "$PLIST_LABEL" RUNNER_DIR "$RUNNER_DIR" BASE_DIR "$BASE_DIR" HOME "$HOME" >"$PLIST_PATH"
 
   # Start
   launchctl bootout "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true

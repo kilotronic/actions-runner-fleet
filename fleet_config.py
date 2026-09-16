@@ -166,6 +166,17 @@ def this_host() -> str:
     return os.environ.get("APPLY_HOST") or socket.gethostname().split(".")[0]
 
 
+def repos_for_this_host(*, host=None, config_path=None) -> list[str]:
+    """Every `owner/repo` this host is meant to run runners for, count > 0.
+
+    Convergence needs this to act per-repo on a host without being told which
+    repos it serves — the disk reclaim in update-host.sh is the first caller.
+    """
+    path = resolve_config_path(explicit=config_path)
+    cfg = load_host(path, host or this_host())
+    return sorted(r for r, n in cfg.counts.items() if n > 0)
+
+
 def container_runtime_for_this_host(*, host=None, config_path=None) -> str:
     """Return this host's container_runtime, or '' if unset / host unknown."""
     path = Path(config_path) if config_path else resolve_config_path()
@@ -183,6 +194,11 @@ if __name__ == "__main__":
     ap.add_argument("--config", help="path to runners.toml")
     ap.add_argument("--host", help="host key (default: hostname -s / APPLY_HOST)")
     ap.add_argument(
+        "--repos",
+        action="store_true",
+        help="print this host's owner/repo entries with a non-zero count",
+    )
+    ap.add_argument(
         "--container-runtime",
         action="store_true",
         help="print this host's container_runtime (empty if unset)",
@@ -192,5 +208,8 @@ if __name__ == "__main__":
         os.environ["ACTIONS_RUNNER_CONFIG"] = args.config
     if args.container_runtime:
         print(container_runtime_for_this_host(host=args.host, config_path=args.config))
+    elif args.repos:
+        for repo in repos_for_this_host(host=args.host, config_path=args.config):
+            print(repo)
     else:
-        ap.error("specify --container-runtime")
+        ap.error("specify --container-runtime or --repos")

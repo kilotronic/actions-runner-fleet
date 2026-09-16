@@ -39,12 +39,17 @@ CI_PG_CONTAINER="${CI_PG_CONTAINER:-ci-postgres}"
 # and it is the one a workflow's own provisioning step has to reclaim.
 _report_ci_postgres() {
   local docker=$1 port=$2 name=$3 line holder
-  line="$("$docker" ps --filter "name=^${name}\$" --format '{{.Status}}' 2>/dev/null | head -1)"
+  # `|| true` on both queries, because this script runs under `set -e` and a
+  # dead container runtime makes `docker ps` exit non-zero — which killed the
+  # whole report at this line. status.sh was therefore silent about disk,
+  # service-file drift and Spotlight on exactly the hosts where the runtime was
+  # down, i.e. the ones most worth reporting on.
+  line="$("$docker" ps --filter "name=^${name}\$" --format '{{.Status}}' 2>/dev/null | head -1 || true)"
   if [[ -n "$line" ]]; then
     echo "CI database: ${line} (localhost:${port})"
     return
   fi
-  holder="$("$docker" ps --filter "publish=${port}" --format '{{.Names}}' 2>/dev/null | head -1)"
+  holder="$("$docker" ps --filter "publish=${port}" --format '{{.Names}}' 2>/dev/null | head -1 || true)"
   if [[ -n "$holder" ]]; then
     echo "CI database: WRONG CONTAINER — '${holder}' holds ${port}, not '${name}'"
   fi
@@ -151,3 +156,65 @@ echo "GitHub runners:"
 gh api "repos/${REPO}/actions/runners" \
   --jq '.runners[] | "  \(.name) — \(.status)\(if .busy then " (busy)" else "" end) (\(.labels | map(.name) | join(", ")))"' \
   2>/dev/null || echo "  (could not query — check gh auth)"
+
+echo ""
+
+# ── Host health ──────────────────────────────────────────────────────────────
+#
+# Three conditions that degrade a host silently — each was found only after it
+# had already cost a run, because nothing reported it.
+
+echo "Host health:"
+
+# Disk. A full host fails jobs without mentioning disk: apt cannot write its
+# InRelease splits, so `playwright install --with-deps` dies behind a wall of
+# GPG signature errors. Convergence prunes under pressure; this makes the
+# pressure visible before it gets there.
+if [[ "$OS" == "Darwin" ]]; then
+  _vol="${CI_DISK_VOLUME:-/System/Volumes/Data}" # `/` is the read-only system volume
+else
+  _vol="${CI_DISK_VOLUME:-/}"
+fi
+_avail="$(df -Pk "$_vol" | awk 'NR==2 {printf "%d", $4/1048576}')"
+_used="$(df -Pk "$_vol" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+if ((_avail < ${CI_DISK_MIN_FREE_GIB:-40})) && ((_used > ${CI_DISK_MAX_USED_PCT:-85})); then
+  echo "  disk: LOW — ${_avail}GiB free, ${_used}% used on $_vol (convergence will prune)"
+else
+  echo "  disk: ${_avail}GiB free, ${_used}% used on $_vol"
+fi
+
+# Service-file drift. The installers skip an already-configured runner, so a
+# unit or plist from an older kit is never rewritten by them; apply.py converges
+# it, but a host that has not converged yet looks identical to a healthy one.
+_drift="$(python3 - "$SCRIPT_DIR" <<'PY' 2>/dev/null || true
+import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("apply", Path(sys.argv[1]) / "apply.py")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+dirs = [p.name for p in mod.RUNNER_BASE.glob("*-[0-9]*") if p.is_dir()]
+for dn, path, _ in mod.service_drift(dirs):
+    print(f"  service file: STALE — {path.name} (apply.py will rewrite it when idle)")
+PY
+)"
+if [[ -n "$_drift" ]]; then
+  printf '%s\n' "$_drift"
+else
+  echo "  service files: match the template"
+fi
+
+# Spotlight (macOS). Indexing the work tree makes `prek --all-files` take four
+# times as long, which shows up as a lint timeout rather than as anything to do
+# with Spotlight. The exclusion is a manual Privacy-list step — .metadata_never_index
+# is inert on an ordinary directory — so nothing converges it and it has to be
+# reported. mdfind -count is the query that discriminates; the obvious
+# `kMDItemFSName == "*"` returns 0 for every path, indexed or not.
+if [[ "$OS" == "Darwin" ]]; then
+  _indexed="$(mdfind -onlyin "$HOME/actions-runner" -count '*' 2>/dev/null || echo 0)"
+  if ((_indexed > 0)); then
+    echo "  spotlight: INDEXING the work tree ($_indexed items) — add ~/actions-runner to"
+    echo "             System Settings > Spotlight > Search Privacy (manual; nothing converges this)"
+  else
+    echo "  spotlight: work tree excluded"
+  fi
+fi
