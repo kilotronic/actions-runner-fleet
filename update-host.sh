@@ -222,4 +222,38 @@ esac
   if [[ -x ./reclaim-ci-disk.sh ]]; then
     ./reclaim-ci-disk.sh 2>&1 | grep -vE '^(disk:|above threshold|not macOS)' || true
   fi
+
+  # Reclaim runner disk under real pressure, on every platform. prune.sh has
+  # existed for months and nothing ever called it, so a host filled up until a
+  # job failed — and it fails in a way that does not mention disk at all: apt
+  # cannot write its InRelease splits, so `playwright install --with-deps` dies
+  # behind a wall of GPG signature errors. Convergence should reclaim before a
+  # job discovers the problem.
+  #
+  # Same thresholds and the same both-must-cross rule as reclaim-ci-disk.sh, so
+  # a large disk at 88% with hundreds of GB free is left alone. Only the
+  # always-safe targets: stale _diag logs, and _work/_temp for runners GitHub
+  # reports idle. Checkouts and the Playwright cache are reported, never
+  # deleted — removing those only forces a re-download on the next job.
+  if [[ -x ./prune.sh && -n "$PY" ]]; then
+    # On macOS `/` is the read-only system volume — 22% used while the data
+    # volume it shares a disk with sits at 84%. Measuring the wrong one would
+    # make this block silently never fire on exactly the hosts with the
+    # tightest disks. reclaim-ci-disk.sh picks the same path for the same reason.
+    if [[ "$(uname -s)" == Darwin ]]; then
+      _disk_vol="${CI_DISK_VOLUME:-/System/Volumes/Data}"
+    else
+      _disk_vol="${CI_DISK_VOLUME:-/}"
+    fi
+    _disk_avail_gib="$(df -Pk "$_disk_vol" | awk 'NR==2 {printf "%d", $4/1048576}')"
+    _disk_used_pct="$(df -Pk "$_disk_vol" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+    if ((_disk_avail_gib < ${CI_DISK_MIN_FREE_GIB:-40})) \
+      && ((_disk_used_pct > ${CI_DISK_MAX_USED_PCT:-85})); then
+      echo "disk low on $_disk_vol (${_disk_avail_gib}GiB free, ${_disk_used_pct}% used) — pruning runner dirs"
+      while read -r _repo; do
+        [[ -n "$_repo" ]] || continue
+        ./prune.sh "$_repo" --apply 2>&1 | sed 's/^/  /' || true
+      done < <("$PY" ./fleet_config.py --repos 2>/dev/null || true)
+    fi
+  fi
 } >>"$LOG" 2>&1
