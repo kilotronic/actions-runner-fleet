@@ -123,7 +123,10 @@ def test_help_needs_no_privileges_and_no_macos() -> None:
     assert "Privacy list" in proc.stdout
 
 
+@pytest.mark.skipif(os.uname().sysname != "Darwin", reason="Spotlight is macOS-only")
 def test_a_path_that_is_not_a_directory_is_refused() -> None:
+    """Off macOS the script exits 0 before it ever looks at the path, which is
+    the correct no-op — so this only means anything on Darwin."""
     proc = run("--dry-run", "/definitely/not/a/real/dir")
     assert proc.returncode == 1
     assert "not a directory" in proc.stdout + proc.stderr
