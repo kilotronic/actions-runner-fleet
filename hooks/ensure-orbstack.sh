@@ -393,9 +393,9 @@ _wedged_watchdog() {
   _orb_restart
   # Deliberately no container restoration. Restart policies handle it:
   # ci-postgres and awth are `unless-stopped` and come back on their own;
-  # partygame's dev db is `restart=no` but is backed by the named volume
-  # `postgres_data`, so `make db` restores it with no data loss.
-  echo "note: containers with restart=no (e.g. partygame dev db) stay down until started; data on named volumes is intact"
+  # a `restart=no` dev database is backed by a named volume, so recreating it
+  # restores the data.
+  echo "note: containers with restart=no stay down until started; data on named volumes is intact"
 }
 
 # Every recovery step is `|| true`: a non-zero from orb stop/start (e.g.

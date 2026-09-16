@@ -41,7 +41,7 @@ def test_started_registers_runner(tmp_path):
         "HOME": str(tmp_path),
         "PATH": f"{bindir}:/usr/bin:/bin",
         "RUNNER_NAME": "host-a-1",
-        "GITHUB_REPOSITORY": "kilotronic/partygame",
+        "GITHUB_REPOSITORY": "acme/app",
         "GITHUB_WORKFLOW": "CI",
         "GITHUB_RUN_NUMBER": "42",
     }
@@ -56,7 +56,7 @@ def test_started_registers_runner(tmp_path):
     out = log.read_text()
     assert "register --type runner" in out
     assert "--session-id runner:host-a-1" in out
-    assert "--repo partygame" in out
+    assert "--repo app" in out
     assert "--machine" in out
 
 

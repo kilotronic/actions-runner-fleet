@@ -3,12 +3,16 @@
 #
 # Usage:
 #   ./status.sh <owner/repo>
-#   ./status.sh jasonluther/partygame
+#   ./status.sh acme/app
 #
 # OS-aware: on Linux the runners are systemd --user services backed by Docker;
-# on macOS they are launchd agents backed by OrbStack. CI Postgres is a bare
-# per-job container provisioned by partygame's scripts/ensure-ci-db.sh — this
-# script just reports whether one is currently up.
+# on macOS they are launchd agents backed by OrbStack.
+#
+# It also reports a CI database container if your workflow provisions one. This
+# kit does not create, start or own it — the report is a convenience, and it is
+# skipped entirely unless a container by that name or a holder of that port
+# exists. Override with CI_PG_CONTAINER (default `ci-postgres`) and CI_PG_PORT
+# (default 5433).
 
 set -euo pipefail
 
@@ -21,32 +25,28 @@ REPO="$1"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OS="$(uname -s)"
 CI_PG_PORT="${CI_PG_PORT:-5433}"
+CI_PG_CONTAINER="${CI_PG_CONTAINER:-ci-postgres}"
 
 # ── Container runtime + CI Postgres ──────────────────────────────────────────
 
-# Report CI Postgres, matching the container name EXACTLY. This filter used to
-# be `name=ci-postgres`, a substring match — which happily matched
-# `partygame-ci-ci-postgres-1`, a leftover of the retired compose pre-warm that
-# outlived its own compose file (deleted in cf484e5) and then served every CI
+# Match the container name EXACTLY. This filter used to be a substring match,
+# which happily matched a differently-named leftover that then served every CI
 # job on a host for two days while this line reported it healthy. A monitor that
 # accepts anything shaped like the right answer cannot detect the wrong one.
 #
-# So: exact name, and if nothing matches, say who is holding the port instead
-# of a bare "not running" — a foreign holder is the interesting failure, and
-# partygame's ensure-ci-db.sh now reclaims exactly that case.
+# So: exact name, and if nothing matches, name whoever holds the port instead of
+# printing a bare "not running" — a foreign holder is the interesting failure,
+# and it is the one a workflow's own provisioning step has to reclaim.
 _report_ci_postgres() {
-  local docker=$1 port=$2 line holder
-  line="$("$docker" ps --filter 'name=^ci-postgres$' --format '{{.Status}}' 2>/dev/null | head -1)"
+  local docker=$1 port=$2 name=$3 line holder
+  line="$("$docker" ps --filter "name=^${name}\$" --format '{{.Status}}' 2>/dev/null | head -1)"
   if [[ -n "$line" ]]; then
-    echo "CI Postgres: ${line} (localhost:${port})"
+    echo "CI database: ${line} (localhost:${port})"
     return
   fi
   holder="$("$docker" ps --filter "publish=${port}" --format '{{.Names}}' 2>/dev/null | head -1)"
   if [[ -n "$holder" ]]; then
-    echo "CI Postgres: WRONG CONTAINER — '${holder}' holds ${port}, not 'ci-postgres'"
-    echo "             (unowned by any code path; partygame's ensure-ci-db.sh will reclaim it)"
-  else
-    echo "CI Postgres: not running (provisioned per-job by partygame's scripts/ensure-ci-db.sh)"
+    echo "CI database: WRONG CONTAINER — '${holder}' holds ${port}, not '${name}'"
   fi
 }
 
@@ -57,7 +57,7 @@ if [[ "$OS" == "Linux" ]]; then
     echo "Docker: not available (daemon down or user lacks docker group)"
   fi
 
-  _report_ci_postgres docker "$CI_PG_PORT"
+  _report_ci_postgres docker "$CI_PG_PORT" "$CI_PG_CONTAINER"
 else
   DOCKER="$HOME/.orbstack/bin/docker"
   if [[ -x "$DOCKER" ]] && "$DOCKER" info &>/dev/null; then
@@ -66,7 +66,7 @@ else
     echo "OrbStack: not running (open OrbStack.app)"
   fi
 
-  _report_ci_postgres "$DOCKER" "$CI_PG_PORT"
+  _report_ci_postgres "$DOCKER" "$CI_PG_PORT" "$CI_PG_CONTAINER"
 fi
 
 echo ""

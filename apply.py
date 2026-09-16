@@ -93,7 +93,7 @@ Plan = namedtuple(
 
 
 def _dir_index(dirname: str) -> int:
-    """Numeric suffix of a runner dir basename (partygame-3 → 3); 0 if none."""
+    """Numeric suffix of a runner dir basename (app-3 → 3); 0 if none."""
     m = re.search(r"-(\d+)$", dirname)
     return int(m.group(1)) if m else 0
 
@@ -111,7 +111,7 @@ def decide(
     """Plan convergence to `desired` healthy *registered* runners. Pure.
 
     desired      D from runners.toml for this repo.
-    local_dirs   this repo's local runner dir basenames (e.g. ["partygame-1"]).
+    local_dirs   this repo's local runner dir basenames (e.g. ["app-1"]).
     gh_runners   [{"name","status"}] filtered to this host+repo, or None if the
                  gh query failed (then every action is un-tokenable → skip).
                  Registration-liveness only — busy/idle is decided locally.
@@ -264,7 +264,7 @@ def debounce_hung(
     known       every runner dir that still exists on the host, or None to skip
                 the check. Records for dirs outside it are dropped — a removed
                 runner must not leave its clock behind, because runner dir names
-                are REUSED (remove partygame-2, install a new one, same name)
+                are REUSED (remove app-2, install a new one, same name)
                 and an inherited ancient timestamp would make the new runner
                 restart on its first sighting, skipping the grace window
                 entirely. Distinct from `evaluated`: a dir that still exists but
@@ -585,8 +585,9 @@ def install_runners(
     """Fill a shortfall via the existing installer (idempotent: skips existing dirs).
 
     Exports CI_SLOTS (and E2E_WORKERS_OVERRIDE when declared) so the installer
-    bakes the host's budget into each new runner's .env (read by partygame's
-    with_ci_slot.py admission gate and ci.yml's browser-e2e pass). Exports
+    bakes the host's budget into each new runner's .env, where the repo's own
+    workflow reads them (an in-job admission gate, a browser-e2e worker count).
+    Exports
     WORK_ROOT when the host offloads _work to an external drive, so install.sh
     symlinks each new runner's _work there.
     """
@@ -609,11 +610,11 @@ def install_runners(
         # install.sh only omits the .env line when this var is unset in ITS
         # environment ([[ -n "${E2E_WORKERS_OVERRIDE:-}" ]]) — apply.py itself
         # always runs with E2E_WORKERS_OVERRIDE already set (baked into every
-        # runner's own .env for the host's partygame sizing), so a bare
+        # runner's own .env for the host's sizing), so a bare
         # os.environ copy silently leaks that stale value into repos where
         # it's meant to stay unmanaged. Pop it explicitly. (Caught 2026-07-16:
-        # jasonluther/actions-runner's fresh .env inherited E2E_WORKERS_OVERRIDE=3
-        # from the installing host's ambient env.)
+        # a second repo's fresh .env inherited E2E_WORKERS_OVERRIDE=3 from the
+        # installing host's ambient env.)
         env.pop("E2E_WORKERS_OVERRIDE", None)
     print(f"  $ {shown} {' '.join(cmd)}")
     return subprocess.call(cmd, env=env) == 0

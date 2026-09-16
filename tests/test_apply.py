@@ -42,7 +42,7 @@ class DecideTest(unittest.TestCase):
 
     def test_in_sync_is_noop(self):
         p = self.decide(
-            2, ["partygame-1", "partygame-2"], [reg("partygame-1"), reg("partygame-2")]
+            2, ["app-1", "app-2"], [reg("app-1"), reg("app-2")]
         )
         self.assertEqual(p.to_reregister, [])
         self.assertEqual(p.to_install, 0)
@@ -52,37 +52,37 @@ class DecideTest(unittest.TestCase):
 
     def test_dead_runner_is_reregistered(self):
         # local dir exists but no GitHub registration → dead → re-register in place.
-        p = self.decide(2, ["partygame-1", "partygame-2"], [reg("partygame-1")])
-        self.assertEqual(p.to_reregister, ["partygame-2"])
+        p = self.decide(2, ["app-1", "app-2"], [reg("app-1")])
+        self.assertEqual(p.to_reregister, ["app-2"])
         self.assertEqual(p.to_install, 0)
         self.assertEqual(p.to_remove, [])
 
     def test_paused_runner_is_healthy_not_dead(self):
         # A load-watchdog-paused runner is offline but STILL registered → healthy,
         # must NOT be re-registered (that would fight the watchdog).
-        p = self.decide(1, ["partygame-1"], [reg("partygame-1", status="offline")])
+        p = self.decide(1, ["app-1"], [reg("app-1", status="offline")])
         self.assertEqual(p.to_reregister, [])
         self.assertEqual(p.to_install, 0)
         self.assertEqual(p.to_remove, [])
 
     def test_shortfall_no_dead_installs(self):
-        p = self.decide(3, ["partygame-1"], [reg("partygame-1")])
+        p = self.decide(3, ["app-1"], [reg("app-1")])
         self.assertEqual(p.to_reregister, [])
         self.assertEqual(p.to_install, 2)
 
     def test_shortfall_with_dead_reregisters_then_installs(self):
         # 1 healthy, 1 dead, want 3 → re-register the dead one, install 1 new.
-        p = self.decide(3, ["partygame-1", "partygame-2"], [reg("partygame-1")])
-        self.assertEqual(p.to_reregister, ["partygame-2"])
+        p = self.decide(3, ["app-1", "app-2"], [reg("app-1")])
+        self.assertEqual(p.to_reregister, ["app-2"])
         self.assertEqual(p.to_install, 1)
 
     def test_excess_idle_is_surgically_removed_highest_index_first(self):
         p = self.decide(
             1,
-            ["partygame-1", "partygame-2"],
-            [reg("partygame-1"), reg("partygame-2")],
+            ["app-1", "app-2"],
+            [reg("app-1"), reg("app-2")],
         )
-        self.assertEqual(p.to_remove, ["partygame-2"])  # keep -1, drop highest idle
+        self.assertEqual(p.to_remove, ["app-2"])  # keep -1, drop highest idle
         self.assertEqual(p.to_reregister, [])
         self.assertEqual(p.to_install, 0)
 
@@ -91,37 +91,37 @@ class DecideTest(unittest.TestCase):
         # idle -1 instead.
         p = self.decide(
             1,
-            ["partygame-1", "partygame-2"],
-            [reg("partygame-1"), reg("partygame-2")],
-            busy_dirs={"partygame-2"},
+            ["app-1", "app-2"],
+            [reg("app-1"), reg("app-2")],
+            busy_dirs={"app-2"},
         )
-        self.assertEqual(p.to_remove, ["partygame-1"])
+        self.assertEqual(p.to_remove, ["app-1"])
 
     def test_all_excess_busy_removes_nothing(self):
         p = self.decide(
             1,
-            ["partygame-1", "partygame-2"],
-            [reg("partygame-1"), reg("partygame-2")],
-            busy_dirs={"partygame-1", "partygame-2"},
+            ["app-1", "app-2"],
+            [reg("app-1"), reg("app-2")],
+            busy_dirs={"app-1", "app-2"},
         )
         self.assertEqual(p.to_remove, [])
         self.assertFalse(p.capped)
 
     def test_blast_radius_cap_refuses_and_flags(self):
         # want 0, have 5 idle healthy → 5 removals > cap 2 → refuse all, flag capped.
-        dirs = [f"partygame-{i}" for i in range(1, 6)]
+        dirs = [f"app-{i}" for i in range(1, 6)]
         p = self.decide(0, dirs, [reg(d) for d in dirs])
         self.assertEqual(p.to_remove, [])
         self.assertTrue(p.capped)
 
     def test_cap_boundary_two_removals_allowed(self):
-        dirs = [f"partygame-{i}" for i in range(1, 4)]  # 3 healthy
+        dirs = [f"app-{i}" for i in range(1, 4)]  # 3 healthy
         p = self.decide(1, dirs, [reg(d) for d in dirs])  # remove 2
-        self.assertEqual(p.to_remove, ["partygame-3", "partygame-2"])
+        self.assertEqual(p.to_remove, ["app-3", "app-2"])
         self.assertFalse(p.capped)
 
     def test_gh_unavailable_skips_everything(self):
-        p = self.decide(3, ["partygame-1"], None)
+        p = self.decide(3, ["app-1"], None)
         self.assertEqual(p.to_reregister, [])
         self.assertEqual(p.to_install, 0)
         self.assertEqual(p.to_remove, [])
@@ -132,8 +132,8 @@ class DecideTest(unittest.TestCase):
         # allow_remove=False: re-register + install still planned; removals suppressed.
         p = self.decide(
             1,
-            ["partygame-1", "partygame-2", "partygame-3"],
-            [reg("partygame-1")],  # -2, -3 dead
+            ["app-1", "app-2", "app-3"],
+            [reg("app-1")],  # -2, -3 dead
             allow_remove=False,
         )
         self.assertEqual(p.to_reregister, [])  # 1 healthy already meets D=1
@@ -147,24 +147,24 @@ class DecideTest(unittest.TestCase):
         # 2 healthy meet D=2; a 3rd dir is dead cruft → cleanup, no reregister.
         p = self.decide(
             2,
-            ["partygame-1", "partygame-2", "partygame-3"],
-            [reg("partygame-1"), reg("partygame-2")],
+            ["app-1", "app-2", "app-3"],
+            [reg("app-1"), reg("app-2")],
         )
         self.assertEqual(p.to_reregister, [])
         self.assertEqual(p.to_install, 0)
         self.assertEqual(p.to_remove, [])
-        self.assertEqual(p.to_cleanup, ["partygame-3"])
+        self.assertEqual(p.to_cleanup, ["app-3"])
 
     def test_shortfall_uses_dead_then_cleans_extra_dead(self):
         # want 2, have 1 healthy + 3 dead → reregister 1 dead, clean the other 2.
         p = self.decide(
             2,
-            ["partygame-1", "partygame-2", "partygame-3", "partygame-4"],
-            [reg("partygame-1")],
+            ["app-1", "app-2", "app-3", "app-4"],
+            [reg("app-1")],
         )
-        self.assertEqual(p.to_reregister, ["partygame-2"])
+        self.assertEqual(p.to_reregister, ["app-2"])
         self.assertEqual(p.to_install, 0)
-        self.assertEqual(sorted(p.to_cleanup), ["partygame-3", "partygame-4"])
+        self.assertEqual(sorted(p.to_cleanup), ["app-3", "app-4"])
 
 
 class RemoveRunnerTest(unittest.TestCase):
@@ -183,7 +183,7 @@ class RemoveRunnerTest(unittest.TestCase):
 
     def test_remove_runner_aborts_when_deregister_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            dirname = "partygame-1"
+            dirname = "app-1"
             d = self._make_runner_dir(tmpdir, dirname)
             with (
                 mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
@@ -204,7 +204,7 @@ class RemoveRunnerTest(unittest.TestCase):
 
     def test_remove_runner_completes_when_deregister_succeeds(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            dirname = "partygame-1"
+            dirname = "app-1"
             self._make_runner_dir(tmpdir, dirname)
             with (
                 mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
@@ -297,7 +297,7 @@ class ApplyEnvRestartsTest(unittest.TestCase):
 
     def test_dir_that_became_busy_since_the_snapshot_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            dirname = "partygame-1"
+            dirname = "app-1"
             d = self._make_env_dir(tmpdir, dirname)
             with (
                 mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
@@ -320,7 +320,7 @@ class ApplyEnvRestartsTest(unittest.TestCase):
 
     def test_dir_still_idle_is_written_and_restarted(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            dirname = "partygame-1"
+            dirname = "app-1"
             d = self._make_env_dir(tmpdir, dirname)
             with (
                 mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
@@ -340,7 +340,7 @@ class ApplyEnvRestartsTest(unittest.TestCase):
 
     def test_just_reregistered_dir_skips_the_busy_check(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            dirname = "partygame-1"
+            dirname = "app-1"
             self._make_env_dir(tmpdir, dirname)
             checked = []
 
@@ -366,7 +366,7 @@ class ApplyEnvRestartsTest(unittest.TestCase):
 
     def test_restart_failure_is_counted_even_when_idle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            dirname = "partygame-1"
+            dirname = "app-1"
             self._make_env_dir(tmpdir, dirname)
             with (
                 mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
@@ -419,68 +419,68 @@ class LoadDesiredTest(unittest.TestCase):
 
     def test_labels_parsed_and_not_treated_as_repo(self):
         counts, _, _, _, labels = self._load(
-            '[hosts.host-b]\nlabels = ["bigmem"]\n"o/partygame" = 1\n'
+            '[hosts.host-b]\nlabels = ["bigmem"]\n"o/app" = 1\n'
         )
         self.assertEqual(labels, ("bigmem",))
-        self.assertEqual(counts, {"o/partygame": 1})
+        self.assertEqual(counts, {"o/app": 1})
 
     def test_labels_default_empty(self):
-        _, _, _, _, labels = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
+        _, _, _, _, labels = self._load('[hosts.host-b]\n"o/app" = 1\n')
         self.assertEqual(labels, ())
 
     def test_labels_reject_bad_values(self):
         for bad in ('labels = "bigmem"', "labels = [1]", 'labels = ["has space"]'):
             with self.subTest(bad=bad), self.assertRaises(SystemExit):
-                self._load(f'[hosts.host-b]\n{bad}\n"o/partygame" = 1\n')
+                self._load(f'[hosts.host-b]\n{bad}\n"o/app" = 1\n')
 
     def test_ci_slots_parsed_and_repos_intact(self):
         counts, ci_slots, _, _, _ = self._load(
-            '[hosts.host-b]\nci_slots = 2\n"o/partygame" = 2\n'
+            '[hosts.host-b]\nci_slots = 2\n"o/app" = 2\n'
         )
-        self.assertEqual(counts, {"o/partygame": 2})
+        self.assertEqual(counts, {"o/app": 2})
         self.assertEqual(ci_slots, 2)
 
     def test_ci_slots_absent_falls_back_to_formula(self):
-        counts, ci_slots, _, _, _ = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
-        self.assertEqual(counts, {"o/partygame": 1})
+        counts, ci_slots, _, _, _ = self._load('[hosts.host-b]\n"o/app" = 1\n')
+        self.assertEqual(counts, {"o/app": 1})
         self.assertEqual(ci_slots, apply._default_ci_slots())
 
     def test_ci_slots_invalid_exits(self):
         with self.assertRaises(SystemExit):
-            self._load('[hosts.host-b]\nci_slots = 0\n"o/partygame" = 1\n')
+            self._load('[hosts.host-b]\nci_slots = 0\n"o/app" = 1\n')
 
     def test_e2e_workers_parsed(self):
         counts, _, e2e, _, _ = self._load(
-            '[hosts.host-b]\nci_slots = 2\ne2e_workers = 3\n"o/partygame" = 2\n'
+            '[hosts.host-b]\nci_slots = 2\ne2e_workers = 3\n"o/app" = 2\n'
         )
-        self.assertEqual(counts, {"o/partygame": 2})
+        self.assertEqual(counts, {"o/app": 2})
         self.assertEqual(e2e, 3)
 
     def test_e2e_workers_absent_is_none(self):
-        _, _, e2e, _, _ = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
+        _, _, e2e, _, _ = self._load('[hosts.host-b]\n"o/app" = 1\n')
         self.assertIsNone(e2e)
 
     def test_e2e_workers_invalid_exits(self):
         for bad in ("e2e_workers = 0", 'e2e_workers = "two"'):
             with self.assertRaises(SystemExit):
-                self._load(f'[hosts.host-b]\n{bad}\n"o/partygame" = 1\n')
+                self._load(f'[hosts.host-b]\n{bad}\n"o/app" = 1\n')
 
     def test_work_root_parsed_and_not_treated_as_repo(self):
         counts, _, _, work_root, _ = self._load(
             '[hosts.host-b]\nwork_root = "/Volumes/Dev/jason/runner-work"\n'
-            '"o/partygame" = 1\n'
+            '"o/app" = 1\n'
         )
-        self.assertEqual(counts, {"o/partygame": 1})
+        self.assertEqual(counts, {"o/app": 1})
         self.assertEqual(work_root, "/Volumes/Dev/jason/runner-work")
 
     def test_work_root_absent_is_none(self):
-        _, _, _, work_root, _ = self._load('[hosts.host-b]\n"o/partygame" = 1\n')
+        _, _, _, work_root, _ = self._load('[hosts.host-b]\n"o/app" = 1\n')
         self.assertIsNone(work_root)
 
     def test_work_root_invalid_exits(self):
         for bad in ('work_root = "relative/path"', "work_root = 5"):
             with self.assertRaises(SystemExit):
-                self._load(f'[hosts.host-b]\n{bad}\n"o/partygame" = 1\n')
+                self._load(f'[hosts.host-b]\n{bad}\n"o/app" = 1\n')
 
 
 class UpsertEnvTest(unittest.TestCase):
@@ -514,7 +514,7 @@ class UpsertEnvTest(unittest.TestCase):
 class InstallRunnersEnvTest(unittest.TestCase):
     def _call_env(self, e2e_workers, work_root=None):
         with mock.patch.object(apply.subprocess, "call", return_value=0) as call:
-            apply.install_runners("o/partygame", 2, 4, e2e_workers, work_root)
+            apply.install_runners("o/app", 2, 4, e2e_workers, work_root)
         return call.call_args.kwargs["env"]
 
     def test_exports_ci_slots_and_e2e_workers(self):
@@ -741,38 +741,38 @@ class ConvergeLabelsTest(unittest.TestCase):
 
     def test_adds_only_the_missing_label(self):
         gh = [
-            self._runner("h-partygame-1", 7, ["self-hosted", "macOS"]),
-            self._runner("h-partygame-2", 8, ["self-hosted", "bigmem"]),
+            self._runner("h-app-1", 7, ["self-hosted", "macOS"]),
+            self._runner("h-app-2", 8, ["self-hosted", "bigmem"]),
         ]
         with mock.patch.object(apply, "_run", return_value=0) as r:
-            n = apply.converge_labels("o/partygame", gh, ("bigmem",))
+            n = apply.converge_labels("o/app", gh, ("bigmem",))
         self.assertEqual(n, 1)
         self.assertEqual(r.call_count, 1)
         cmd = r.call_args[0][0]
-        self.assertIn("repos/o/partygame/actions/runners/7/labels", cmd)
+        self.assertIn("repos/o/app/actions/runners/7/labels", cmd)
         self.assertIn("labels[]=bigmem", cmd)
 
     def test_noop_when_all_present(self):
-        gh = [self._runner("h-partygame-1", 7, ["self-hosted", "bigmem"])]
+        gh = [self._runner("h-app-1", 7, ["self-hosted", "bigmem"])]
         with mock.patch.object(apply, "_run", return_value=0) as r:
             self.assertEqual(apply.converge_labels("o/p", gh, ("bigmem",)), 0)
         r.assert_not_called()
 
     def test_noop_without_extra_labels(self):
-        gh = [self._runner("h-partygame-1", 7, ["self-hosted"])]
+        gh = [self._runner("h-app-1", 7, ["self-hosted"])]
         with mock.patch.object(apply, "_run", return_value=0) as r:
             self.assertEqual(apply.converge_labels("o/p", gh, ()), 0)
         r.assert_not_called()
 
     def test_gh_failure_is_not_fatal(self):
         """A failed add is reported and skipped — the next tick retries."""
-        gh = [self._runner("h-partygame-1", 7, ["self-hosted"])]
+        gh = [self._runner("h-app-1", 7, ["self-hosted"])]
         with mock.patch.object(apply, "_run", return_value=1):
             self.assertEqual(apply.converge_labels("o/p", gh, ("bigmem",)), 0)
 
     def test_never_removes_an_unexpected_label(self):
         """Additive only: a hand-added label is somebody's deliberate act."""
-        gh = [self._runner("h-partygame-1", 7, ["self-hosted", "bigmem", "manual"])]
+        gh = [self._runner("h-app-1", 7, ["self-hosted", "bigmem", "manual"])]
         with mock.patch.object(apply, "_run", return_value=0) as r:
             self.assertEqual(apply.converge_labels("o/p", gh, ("bigmem",)), 0)
         r.assert_not_called()
@@ -798,54 +798,54 @@ class HungDirsTest(unittest.TestCase):
         )
 
     def test_offline_running_and_idle_is_hung(self):
-        gh = [reg("partygame-1", status="offline")]
-        self.assertEqual(self.hung(gh, ["partygame-1"]), ["partygame-1"])
+        gh = [reg("app-1", status="offline")]
+        self.assertEqual(self.hung(gh, ["app-1"]), ["app-1"])
 
     def test_online_runner_is_healthy(self):
-        gh = [reg("partygame-1", status="online")]
-        self.assertEqual(self.hung(gh, ["partygame-1"]), [])
+        gh = [reg("app-1", status="online")]
+        self.assertEqual(self.hung(gh, ["app-1"]), [])
 
     def test_busy_runner_is_never_hung(self):
         """A live Runner.Worker means it is working; an offline status against
         that is a GitHub-side blip, and a restart would abort a real job."""
-        gh = [reg("partygame-1", status="offline")]
-        self.assertEqual(self.hung(gh, ["partygame-1"], busy_dirs={"partygame-1"}), [])
+        gh = [reg("app-1", status="offline")]
+        self.assertEqual(self.hung(gh, ["app-1"], busy_dirs={"app-1"}), [])
 
     def test_load_watchdog_paused_runner_is_left_alone(self):
         """The watchdog stops services on purpose — offline is the goal, not a
         fault. Restarting here would fight it every tick."""
-        gh = [reg("partygame-1", status="offline")]
+        gh = [reg("app-1", status="offline")]
         self.assertEqual(
-            self.hung(gh, ["partygame-1"], paused_dirs={"partygame-1"}), []
+            self.hung(gh, ["app-1"], paused_dirs={"app-1"}), []
         )
 
     def test_stopped_service_is_not_hung(self):
         """Nothing is running to be wedged; someone stopped it deliberately."""
-        gh = [reg("partygame-1", status="offline")]
-        self.assertEqual(self.hung(gh, ["partygame-1"], running=False), [])
+        gh = [reg("app-1", status="offline")]
+        self.assertEqual(self.hung(gh, ["app-1"], running=False), [])
 
     def test_unregistered_dir_is_decides_problem_not_ours(self):
         """No registration at all is the sleep-deregistration case that
         decide() re-registers — not a hung listener."""
-        self.assertEqual(self.hung([], ["partygame-1"]), [])
+        self.assertEqual(self.hung([], ["app-1"]), [])
 
     def test_gh_failure_yields_nothing(self):
         """Same skip contract as decide(): no GitHub side, no mismatch."""
-        self.assertEqual(self.hung(None, ["partygame-1"]), [])
+        self.assertEqual(self.hung(None, ["app-1"]), [])
 
     def test_service_is_not_probed_when_nothing_is_offline(self):
         """service_running shells out per dir and apply.py runs on every
         job-completed hook, so the common (all-healthy) case must cost nothing."""
         probe = mock.Mock(return_value=True)
-        gh = [reg("partygame-1"), reg("partygame-2")]
-        self.hung(gh, ["partygame-1", "partygame-2"], service_running=probe)
+        gh = [reg("app-1"), reg("app-2")]
+        self.hung(gh, ["app-1", "app-2"], service_running=probe)
         probe.assert_not_called()
 
     def test_results_are_ordered_by_runner_index(self):
-        gh = [reg(f"partygame-{i}", status="offline") for i in (10, 2, 1)]
+        gh = [reg(f"app-{i}", status="offline") for i in (10, 2, 1)]
         self.assertEqual(
-            self.hung(gh, ["partygame-10", "partygame-2", "partygame-1"]),
-            ["partygame-1", "partygame-2", "partygame-10"],
+            self.hung(gh, ["app-10", "app-2", "app-1"]),
+            ["app-1", "app-2", "app-10"],
         )
 
 
@@ -857,35 +857,35 @@ class DebounceHungTest(unittest.TestCase):
     GRACE = apply.HUNG_GRACE_SECONDS
 
     def test_first_sighting_records_but_does_not_act(self):
-        act, seen = apply.debounce_hung(1000.0, {}, {"partygame-1"}, {"partygame-1"})
+        act, seen = apply.debounce_hung(1000.0, {}, {"app-1"}, {"app-1"})
         self.assertEqual(act, [])
-        self.assertEqual(seen, {"partygame-1": 1000.0})
+        self.assertEqual(seen, {"app-1": 1000.0})
 
     def test_still_hung_inside_the_grace_window_keeps_waiting(self):
         act, seen = apply.debounce_hung(
             1000.0 + self.GRACE - 1,
-            {"partygame-1": 1000.0},
-            {"partygame-1"},
-            {"partygame-1"},
+            {"app-1": 1000.0},
+            {"app-1"},
+            {"app-1"},
         )
         self.assertEqual(act, [])
-        self.assertEqual(seen, {"partygame-1": 1000.0})  # clock keeps running
+        self.assertEqual(seen, {"app-1": 1000.0})  # clock keeps running
 
     def test_still_hung_after_the_grace_window_restarts(self):
         act, seen = apply.debounce_hung(
             1000.0 + self.GRACE,
-            {"partygame-1": 1000.0},
-            {"partygame-1"},
-            {"partygame-1"},
+            {"app-1": 1000.0},
+            {"app-1"},
+            {"app-1"},
         )
-        self.assertEqual(act, ["partygame-1"])
+        self.assertEqual(act, ["app-1"])
         self.assertEqual(seen, {})  # cleared: next pass re-arms a full grace
 
     def test_recovered_runner_is_forgotten(self):
         """Evaluated and no longer hung → the clock resets, so a runner that
         flaps offline briefly never accumulates its way to a restart."""
         act, seen = apply.debounce_hung(
-            9999.0, {"partygame-1": 1000.0}, set(), {"partygame-1"}
+            9999.0, {"app-1": 1000.0}, set(), {"app-1"}
         )
         self.assertEqual(act, [])
         self.assertEqual(seen, {})
@@ -893,16 +893,16 @@ class DebounceHungTest(unittest.TestCase):
     def test_unevaluated_runner_keeps_its_clock(self):
         """Its repo's gh query failed, so we have no evidence either way.
         Clearing would restart the grace clock forever on a flaky-gh host."""
-        act, seen = apply.debounce_hung(9999.0, {"partygame-1": 1000.0}, set(), set())
+        act, seen = apply.debounce_hung(9999.0, {"app-1": 1000.0}, set(), set())
         self.assertEqual(act, [])
-        self.assertEqual(seen, {"partygame-1": 1000.0})
+        self.assertEqual(seen, {"app-1": 1000.0})
 
     def test_removed_runner_dir_loses_its_clock(self):
-        """Runner dir names are reused (remove partygame-2, install a new one
+        """Runner dir names are reused (remove app-2, install a new one
         under the same name). An inherited timestamp would make the new runner
         restart on its first sighting, skipping the grace window entirely."""
         act, seen = apply.debounce_hung(
-            9999.0, {"partygame-2": 1000.0}, set(), set(), known={"partygame-1"}
+            9999.0, {"app-2": 1000.0}, set(), set(), known={"app-1"}
         )
         self.assertEqual(act, [])
         self.assertEqual(seen, {})
@@ -912,28 +912,28 @@ class DebounceHungTest(unittest.TestCase):
         for a dir that is still installed."""
         act, seen = apply.debounce_hung(
             9999.0,
-            {"partygame-1": 1000.0},
+            {"app-1": 1000.0},
             set(),
             set(),
-            known={"partygame-1"},
+            known={"app-1"},
         )
         self.assertEqual(act, [])
-        self.assertEqual(seen, {"partygame-1": 1000.0})
+        self.assertEqual(seen, {"app-1": 1000.0})
 
     def test_restart_is_bounded_to_one_per_grace_period(self):
         """A runner that cannot be revived bounces every grace period and says
         so in the log — it does not spin in a tight relaunch loop."""
         now = 1000.0 + self.GRACE
         act, seen = apply.debounce_hung(
-            now, {"partygame-1": 1000.0}, {"partygame-1"}, {"partygame-1"}
+            now, {"app-1": 1000.0}, {"app-1"}, {"app-1"}
         )
-        self.assertEqual(act, ["partygame-1"])
+        self.assertEqual(act, ["app-1"])
         # Next pass, one second later: still hung, but the clock restarted.
         act2, seen2 = apply.debounce_hung(
-            now + 1, seen, {"partygame-1"}, {"partygame-1"}
+            now + 1, seen, {"app-1"}, {"app-1"}
         )
         self.assertEqual(act2, [])
-        self.assertEqual(seen2, {"partygame-1": now + 1})
+        self.assertEqual(seen2, {"app-1": now + 1})
 
 
 class ApplyHungRestartsTest(unittest.TestCase):
@@ -942,7 +942,7 @@ class ApplyHungRestartsTest(unittest.TestCase):
         busy guard, and this runs at the end of a pass that may have spent
         minutes installing runners."""
         with mock.patch.object(apply, "_svc_restart") as svc_restart:
-            failed = apply.apply_hung_restarts(["partygame-1"], is_busy=lambda dn: True)
+            failed = apply.apply_hung_restarts(["app-1"], is_busy=lambda dn: True)
         self.assertEqual(failed, 0)
         svc_restart.assert_not_called()
 
@@ -950,16 +950,16 @@ class ApplyHungRestartsTest(unittest.TestCase):
         with mock.patch.object(apply, "_svc_restart", return_value=True) as svc_restart:
             with contextlib.redirect_stdout(io.StringIO()):
                 failed = apply.apply_hung_restarts(
-                    ["partygame-1"], is_busy=lambda dn: False
+                    ["app-1"], is_busy=lambda dn: False
                 )
         self.assertEqual(failed, 0)
-        svc_restart.assert_called_once_with("partygame-1")
+        svc_restart.assert_called_once_with("app-1")
 
     def test_failed_restart_is_counted(self):
         with mock.patch.object(apply, "_svc_restart", return_value=False):
             with contextlib.redirect_stdout(io.StringIO()):
                 failed = apply.apply_hung_restarts(
-                    ["partygame-1"], is_busy=lambda dn: False
+                    ["app-1"], is_busy=lambda dn: False
                 )
         self.assertEqual(failed, 1)
 
@@ -970,8 +970,8 @@ class HealthStateTest(unittest.TestCase):
             with mock.patch.object(
                 apply, "HEALTH_STATE_FILE", Path(tmpdir) / "runner-health.state"
             ):
-                apply.save_health_state({"partygame-1": 1000.4})
-                self.assertEqual(apply.load_health_state(), {"partygame-1": 1000.0})
+                apply.save_health_state({"app-1": 1000.4})
+                self.assertEqual(apply.load_health_state(), {"app-1": 1000.0})
 
     def test_missing_or_corrupt_state_reads_as_empty(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -984,10 +984,10 @@ class HealthStateTest(unittest.TestCase):
     def test_load_watchdog_paused_is_read_from_its_state_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "load-watchdog.state").write_text(
-                '{"high_ticks": 3, "paused": ["partygame-2"]}'
+                '{"high_ticks": 3, "paused": ["app-2"]}'
             )
             with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
-                self.assertEqual(apply.load_watchdog_paused(), {"partygame-2"})
+                self.assertEqual(apply.load_watchdog_paused(), {"app-2"})
 
     def test_lid_watchdog_paused_counts_too(self):
         """A laptop with the lid shut parks runners via lid-watchdog alone —
@@ -995,11 +995,11 @@ class HealthStateTest(unittest.TestCase):
         treat every parked runner on a closed laptop as a hung listener."""
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "lid-watchdog.state").write_text(
-                '{"paused": ["partygame-1", "dotfiles-jl-1"]}'
+                '{"paused": ["app-1", "dotfiles-jl-1"]}'
             )
             with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
                 self.assertEqual(
-                    apply.load_watchdog_paused(), {"partygame-1", "dotfiles-jl-1"}
+                    apply.load_watchdog_paused(), {"app-1", "dotfiles-jl-1"}
                 )
 
     def test_both_watchdog_state_files_are_unioned(self):
