@@ -38,9 +38,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check scripts are executable
+        # Globbed, not listed. The list this replaced named 5 of the repo's 20
+        # tracked scripts, so status.sh, reclaim-ci-disk.sh, exclude-ci-paths.sh,
+        # install-menubar.sh, prune.sh and both sandbox suites were never checked
+        # — and a new script joined that set by default. The rule the tree
+        # already follows: a `_`-prefixed .sh is a sourced library and carries no
+        # +x; everything else is runnable and must.
         run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files '*.sh' | grep -vE '(^|/)_')
+          (( ${#files[@]} )) || { echo "ERROR: no scripts matched — the scan is broken"; exit 1; }
           status=0
-          for f in install.sh uninstall.sh install-linux.sh uninstall-linux.sh update-host.sh; do
+          for f in "${files[@]}"; do
             if [ ! -x "$f" ]; then
               echo "ERROR: $f is not executable"
               status=1
@@ -48,8 +57,13 @@ jobs:
           done
           exit $status
       - name: Syntax check (bash -n)
+        # Every .sh, libraries included — they are sourced, so a syntax error in
+        # one breaks its caller.
         run: |
-          for f in install.sh uninstall.sh install-linux.sh uninstall-linux.sh update-host.sh hooks/*.sh; do
+          set -euo pipefail
+          mapfile -t files < <(git ls-files '*.sh')
+          (( ${#files[@]} )) || { echo "ERROR: no scripts matched — the scan is broken"; exit 1; }
+          for f in "${files[@]}"; do
             bash -n "$f" || exit 1
           done
       - name: OrbStack ensure sandbox
