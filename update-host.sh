@@ -108,25 +108,29 @@ if [[ -n "$PY" && -f ./apply.py ]]; then
 fi
 case "$(uname -s)" in
   Linux)
-    # OPTIONAL, operator-supplied: a polkit rule letting the runner user take
-    # block:sleep inhibitors. polkit's default grants inhibit-block-sleep only to
-    # processes in an active login session, and the runner service is not one, so
-    # without a rule the hooks' inhibitors are refused unless something else
-    # grants them (an earlier note here said the default allowed it; the host it
-    # was measured on turned out to have this rule installed). This kit
-    # deliberately does NOT ship the rule: it is a privileged policy change, and a
-    # machine that never suspends does not need it. README "Sleep inhibitors
-    # (Linux)" has it; a copy at the path below is kept installed. The hooks warn
-    # when the inhibitor is refused; a missing file is a silent no-op. sudo -n:
-    # hosts that do not grant passwordless sudo warn
-    # rather than hang a hook-triggered update. Privileged host state, not
-    # runner config, so it stays here rather than moving into apply.py.
-    POLKIT_RULE=polkit/49-actions-runner-inhibit.rules
+    # Keep an ALREADY-INSTALLED polkit inhibitor rule in sync with the template.
+    # Creating one is install-polkit-rule.sh's job, never this script's: it is a
+    # privileged policy change and a machine that never suspends does not need
+    # it, so opting in stays an explicit act. The test here is therefore "does
+    # the destination exist", not "does a source exist" — the previous version
+    # asked the latter about a path inside this checkout, which has shipped no
+    # such file since the rule became a template, so it was a silent no-op on
+    # every host. Hosts that predate the template keep working: their installed
+    # copy is byte-compared against the freshly rendered one.
+    #
+    # sudo -n: a host without passwordless sudo warns rather than hanging a
+    # hook-triggered update. Privileged host state, not runner config, so it
+    # stays here rather than moving into apply.py.
+    POLKIT_TEMPLATE=polkit/49-actions-runner-inhibit.rules.in
     POLKIT_DEST=/etc/polkit-1/rules.d/49-actions-runner-inhibit.rules
-    if [[ -f "$POLKIT_RULE" ]] && ! cmp -s "$POLKIT_RULE" "$POLKIT_DEST" 2>/dev/null; then
-      sudo -n install -m 644 -o root -g root "$POLKIT_RULE" "$POLKIT_DEST" 2>/dev/null \
-        && echo "installed polkit inhibitor rule -> $POLKIT_DEST" \
-        || echo "warning: could not install $POLKIT_DEST (sudo -n denied?)"
+    if [[ -f "$POLKIT_DEST" && -f "$POLKIT_TEMPLATE" ]]; then
+      POLKIT_RENDERED="$(sed "s/@RUNNER_USER@/$(id -un)/g" "$POLKIT_TEMPLATE")"
+      if ! printf '%s\n' "$POLKIT_RENDERED" | cmp -s - "$POLKIT_DEST"; then
+        printf '%s\n' "$POLKIT_RENDERED" \
+          | sudo -n install -m 644 -o root -g root /dev/stdin "$POLKIT_DEST" 2>/dev/null \
+          && echo "re-rendered polkit inhibitor rule -> $POLKIT_DEST" \
+          || echo "warning: could not update $POLKIT_DEST (sudo -n denied?)"
+      fi
     fi
     ;;
 esac
