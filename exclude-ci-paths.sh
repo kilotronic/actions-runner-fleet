@@ -56,10 +56,13 @@
 #                             `OrbStack:/OrbStack on /Users/jason/OrbStack`),
 #                             not because the file works on directories.
 #   `mdutil -i off <dir>`     mdutil operates on volumes/stores, not paths.
-#   Privacy list              The supported mechanism, but it lives in a
-#                             root-owned VolumeConfiguration.plist and these
-#                             hosts have no passwordless sudo, so neither this
-#                             script nor the maintenance timer can write it.
+#   Privacy list              The supported mechanism, and the one that works.
+#                             It lives in a root-owned VolumeConfiguration.plist
+#                             and these hosts have no passwordless sudo, so
+#                             neither this script nor the maintenance timer can
+#                             write it — but a human at a shell can, which is
+#                             what ./exclude-spotlight.sh is for. This script
+#                             reports the path and points there.
 #
 # Beware of verifying this with the wrong query: `mdfind -onlyin <p>
 # 'kMDItemFSName == "*"'` returns 0 for EVERY path, indexed or not, which reads
@@ -148,7 +151,7 @@ _manual=()
 # report paths Spotlight demonstrably still has indexed, so this line goes away
 # on a host where it has actually been done.
 if _spotlight_indexed "$BASE_DIR"; then
-  _manual+=("Spotlight: System Settings > Siri & Spotlight > Spotlight Privacy… -> add $BASE_DIR")
+  _manual+=("Spotlight: ./exclude-spotlight.sh   (adds $BASE_DIR to the Privacy list; needs sudo)")
 fi
 
 # Backblaze's exclusion rules live in a root-owned XML that the app rewrites on
