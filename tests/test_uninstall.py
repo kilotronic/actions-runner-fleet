@@ -152,6 +152,16 @@ def test_last_runner_removes_timers_and_kit_files_but_keeps_logs(tmp_path, scrip
     assert (sb.base / "logs" / "update.log").is_file()
     assert sb.inventory.is_file() and sb.sound.is_file()
 
+    # The kept-message must not disown what it kept. logs/ and ci-env-jobs.jsonl
+    # are BOTH written by this kit (hooks/log-job-env.sh writes the latter into
+    # $base), and both survive a teardown on purpose — the reason for the
+    # teardown is often in them. Saying "files the kit does not own" told the
+    # operator the opposite.
+    kept = [ln for ln in r.stdout.splitlines() if ln.strip().startswith("kept ")]
+    assert kept, r.stdout
+    assert "does not own" not in " ".join(kept)
+    assert "logs" in " ".join(kept)
+
 
 @pytest.mark.parametrize("script", SCRIPTS)
 def test_nothing_left_removes_the_base_dir(tmp_path, script):

@@ -90,14 +90,17 @@ teardown_host() {
 
   # The kit's own files. .shared-externals-* goes only now, never while any
   # runner remains: every runner's externals/ symlink points at it, across repos.
-  # Logs and anything unrecognised are kept; the inventory under
-  # ~/.config/actions-runner is never touched.
+  #
+  # What STAYS is the kit's own diagnostics — logs/ and ci-env-jobs.jsonl, both
+  # written by this kit — kept on purpose, because the reason someone is tearing
+  # a host down is often in them. Plus anything here the kit did not put there.
+  # The inventory under ~/.config/actions-runner is never touched.
   rm -rf "$base/hooks" "$base/.cache" "$base"/.shared-externals-* "$base/.shared-tool-cache" 2>/dev/null || true
   rm -f "$base/.repo-path" "$base/.update.lock" "$base/.uv-self-update-stamp" "$base"/*.state 2>/dev/null || true
   if rmdir "$base" 2>/dev/null; then
     echo "  removed $base"
   else
-    echo "  kept $base (logs and any files the kit does not own)"
+    echo "  kept $base (its logs and job-env records, plus anything else here)"
   fi
   if _teardown_still_listed "$tools" "$repo" "$py"; then
     echo "note: ${repo} is still listed for this host in runners.toml; running apply.py would reinstall it."
