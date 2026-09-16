@@ -92,6 +92,7 @@ def test_an_empty_username_is_refused_by_the_argument_parser() -> None:
 
 
 def test_dry_run_never_writes(tmp_path: Path) -> None:
+    path, log = stub_sudo
     dest = tmp_path / "rule.rules"
     proc = run("--dry-run", "--user", "ci", dest=dest)
     assert proc.returncode == 0
@@ -156,16 +157,25 @@ def test_the_installer_is_not_called_by_any_installer() -> None:
 # only: off Linux the script correctly refuses to touch anything.
 
 SUDO_STUB = """#!/usr/bin/env bash
-# Stand in for sudo: drop -n, and drop `install`'s -o/-g since the test user
-# cannot chown to root. Everything else runs as given.
+# Stand in for sudo. CI runs as an unprivileged user, so the two things that
+# genuinely need root are neutralised and RECORDED rather than skipped silently:
+# the test asserts they were attempted.
 args=()
 while (($#)); do
   case "$1" in
     -n) shift ;;
-    -o|-g) shift 2 ;;
-    *) args+=("$1"); shift ;;
+    -o | -g) shift 2 ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
   esac
 done
+if [[ "${args[0]:-}" == chown ]]; then
+  echo "${args[*]}" >>"$SUDO_LOG"
+  exit 0
+fi
+echo "${args[*]}" >>"$SUDO_LOG"
 exec "${args[@]}"
 """
 
@@ -177,7 +187,9 @@ def stub_sudo(tmp_path: Path):
     stub = binp / "sudo"
     stub.write_text(SUDO_STUB)
     stub.chmod(0o755)
-    return f"{binp}:{os.environ['PATH']}"
+    log = tmp_path / "sudo.log"
+    log.touch()
+    return f"{binp}:{os.environ['PATH']}", log
 
 
 linux_only = pytest.mark.skipif(
@@ -187,11 +199,12 @@ linux_only = pytest.mark.skipif(
 
 @linux_only
 def test_install_writes_the_rendered_rule_then_is_idempotent(
-    tmp_path: Path, stub_sudo: str
+    tmp_path: Path, stub_sudo: tuple[str, Path]
 ) -> None:
+    path, log = stub_sudo
     dest = tmp_path / "49-actions-runner-inhibit.rules"
 
-    first = run("--user", "ci", dest=dest, PATH=stub_sudo)
+    first = run("--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log))
     assert first.returncode == 0, first.stderr
     assert dest.exists()
     body = dest.read_text()
@@ -199,9 +212,16 @@ def test_install_writes_the_rendered_rule_then_is_idempotent(
     assert PLACEHOLDER not in body
     assert "installed" in first.stdout
 
+    # The stub cannot chown to root as an unprivileged CI user, so it records
+    # instead of doing — but the attempt must still be made, or the rule would
+    # land owned by whoever ran the installer.
+    calls = log.read_text()
+    assert "chown root:root" in calls, calls
+    assert "chmod 644" in calls, calls
+
     # Second run must change nothing and say so — update-host.sh relies on this
     # comparison to avoid reinstalling on every convergence pass.
-    second = run("--user", "ci", dest=dest, PATH=stub_sudo)
+    second = run("--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log))
     assert second.returncode == 0
     assert "already current" in second.stdout
     assert dest.read_text() == body
@@ -209,39 +229,44 @@ def test_install_writes_the_rendered_rule_then_is_idempotent(
 
 @linux_only
 def test_changing_the_user_rewrites_an_existing_rule(
-    tmp_path: Path, stub_sudo: str
+    tmp_path: Path, stub_sudo: tuple[str, Path]
 ) -> None:
+    path, log = stub_sudo
     dest = tmp_path / "rule.rules"
-    run("--user", "ci", dest=dest, PATH=stub_sudo)
-    run("--user", "runner", dest=dest, PATH=stub_sudo)
+    run("--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log))
+    run("--user", "runner", dest=dest, PATH=path, SUDO_LOG=str(log))
     body = dest.read_text()
     assert 'subject.user == "runner"' in body
     assert '"ci"' not in body
 
 
 @linux_only
-def test_uninstall_removes_an_installed_rule(tmp_path: Path, stub_sudo: str) -> None:
+def test_uninstall_removes_an_installed_rule(
+    tmp_path: Path, stub_sudo: tuple[str, Path]
+) -> None:
+    path, log = stub_sudo
     dest = tmp_path / "rule.rules"
-    run("--user", "ci", dest=dest, PATH=stub_sudo)
+    run("--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log))
     assert dest.exists()
-    proc = run("--uninstall", dest=dest, PATH=stub_sudo)
+    proc = run("--uninstall", dest=dest, PATH=path, SUDO_LOG=str(log))
     assert proc.returncode == 0
     assert not dest.exists()
 
 
 @linux_only
 def test_a_missing_rules_dir_is_created_when_polkit_is_present(
-    tmp_path: Path, stub_sudo: str
+    tmp_path: Path, stub_sudo: tuple[str, Path]
 ) -> None:
     """`install` does not create a missing parent — this failed on a real host.
 
     The error was `install: No such file or directory`, naming neither the path
     nor the reason.
     """
+    path, log = stub_sudo
     dest = tmp_path / "polkit-1" / "rules.d" / "49-actions-runner-inhibit.rules"
     assert not dest.parent.exists()
     proc = run(
-        "--user", "ci", dest=dest, PATH=stub_sudo, POLKIT_PRESENT_CHECK="true"
+        "--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log), POLKIT_PRESENT_CHECK="true"
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert dest.is_file()
@@ -250,16 +275,17 @@ def test_a_missing_rules_dir_is_created_when_polkit_is_present(
 
 @linux_only
 def test_a_missing_rules_dir_without_polkit_is_refused(
-    tmp_path: Path, stub_sudo: str
+    tmp_path: Path, stub_sudo: tuple[str, Path]
 ) -> None:
     """Writing a rule nothing reads is a silent no-op dressed as success.
 
     That is the same shape as the bug this script exists to fix, so it refuses
     and names the package to install instead.
     """
+    path, log = stub_sudo
     dest = tmp_path / "polkit-1" / "rules.d" / "49-actions-runner-inhibit.rules"
     proc = run(
-        "--user", "ci", dest=dest, PATH=stub_sudo, POLKIT_PRESENT_CHECK="false"
+        "--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log), POLKIT_PRESENT_CHECK="false"
     )
     assert proc.returncode == 1
     assert "polkit is not installed" in proc.stderr
