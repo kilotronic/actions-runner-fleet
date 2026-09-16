@@ -155,6 +155,21 @@ elif ! _polkit_present; then
   echo "         the rule may sit unused until polkit is installed." >&2
 fi
 
-printf '%s\n' "$rendered" | sudo install -m 644 -o root -g root /dev/stdin "$DEST"
+# Install from a real file, never `sudo install /dev/stdin`. That spelling is
+# fragile in exactly the setups this runs in: sudoers with `Defaults use_pty`
+# (now common on Debian/Ubuntu) gives the command a fresh pty for stdin, so
+# /dev/stdin no longer names the pipe and `install` fails with a bare
+# "No such file or directory" that names neither the path it meant nor why. A
+# temp file has no such ambiguity, and the failure below can name the target.
+_tmp_rule="$(mktemp)"
+trap 'rm -f "$_tmp_rule"' EXIT
+printf '%s\n' "$rendered" >"$_tmp_rule"
+
+if ! sudo install -m 644 -o root -g root "$_tmp_rule" "$DEST"; then
+  echo "failed to install $DEST" >&2
+  echo "  parent dir exists: $([[ -d "$POLKIT_DIR" ]] && echo yes || echo NO)" >&2
+  echo "  sudo works:        $(sudo -n true 2>/dev/null && echo yes || echo "needs a password or is denied")" >&2
+  exit 1
+fi
 echo "installed $DEST (user: $RUNNER_USER)"
 echo "polkit reads rules.d immediately — the next job's hooks hold their inhibitors."
