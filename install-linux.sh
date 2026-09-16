@@ -26,6 +26,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The runner build must match this machine's architecture (see _runner_arch.sh).
 # shellcheck source=_runner_arch.sh
 . "$SCRIPT_DIR/_runner_arch.sh"
+# shellcheck source=_render.sh
+. "$SCRIPT_DIR/_render.sh"
 RUNNER_ARCH="$(runner_build linux)" || {
   echo "error: the GitHub Actions runner has no Linux build for $(uname -m)" >&2
   exit 1
@@ -294,40 +296,8 @@ ENV
 
   mkdir -p "$RUNNER_DIR/logs"
 
-  cat >"$UNIT_PATH" <<UNIT
-[Unit]
-Description=GitHub Actions Runner (${RUNNER_NAME})
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=${RUNNER_DIR}
-ExecStart=${RUNNER_DIR}/run.sh
-# on-failure only restarts a non-zero exit. The runner's own self-update
-# (GitHub bumping the minimum agent version) stops run.sh with a clean
-# UserCancelled exit (0), not a crash — on-failure left that unrestarted.
-# This is a long-running listener; it should always come back. See the
-# macOS install.sh KeepAlive.SuccessfulExit comment for the same gap.
-Restart=always
-RestartSec=5
-# control-group (the systemd default): on stop/restart, SIGTERM every process in
-# the unit's cgroup — crucially the Runner.Listener itself, which traps SIGTERM,
-# deregisters its GitHub session, and exits cleanly; the fresh unit then claims a
-# clean session. KillMode=process SIGTERM'd only run.sh and left the listener
-# child orphaned (kept serving GitHub unmanaged, silently dropped offline when it
-# died). KillMode=mixed is no better here: the listener is a *child*, so mixed
-# SIGKILLs it without a deregister, wedging the server-side session ("a session
-# for this runner already exists") on the next start. Restarting an idle runner
-# is therefore clean; restart only when idle (a job in flight is interrupted).
-KillMode=control-group
-KillSignal=SIGTERM
-TimeoutStopSec=5min
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:%h/.local/bin
-
-[Install]
-WantedBy=default.target
-UNIT
+  render_template "$SCRIPT_DIR/templates/github-runner.service.in" \
+    RUNNER_NAME "$RUNNER_NAME" RUNNER_DIR "$RUNNER_DIR" >"$UNIT_PATH"
 
   systemctl --user daemon-reload
   systemctl --user enable --now "$UNIT_NAME"

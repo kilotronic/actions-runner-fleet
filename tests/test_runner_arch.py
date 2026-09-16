@@ -16,6 +16,8 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "_runner_arch.sh"
+# The installers source this too; a kit without it dies before the arch check.
+RENDER = REPO / "_render.sh"
 BASH = shutil.which("bash")
 INSTALLERS = ["install-linux.sh", "install.sh"]
 
@@ -85,6 +87,7 @@ def _configuration(tmp_path, installer, machine, arm64_hw=None):
     kit.mkdir()
     shutil.copy(REPO / installer, kit / installer)
     shutil.copy(HELPER, kit / "_runner_arch.sh")
+    shutil.copy(RENDER, kit / "_render.sh")
     script = (
         'source <(sed -n "/^# ── Configuration/,/^# ── Helpers/p" "$0") && '
         'echo "$RUNNER_URL"'

@@ -484,6 +484,118 @@ def mint_token(repo: str, kind: str):
     return r.stdout.strip() or None
 
 
+TEMPLATE_DIR = SCRIPT_DIR / "templates"
+
+
+def render_template(path: Path, **values: str) -> str:
+    """Mirror of _render.sh's render_template, so one template serves both.
+
+    Raises on a leftover @PLACEHOLDER@ rather than returning it: a unit file
+    containing a literal @RUNNER_DIR@ loads fine and then never works, which is
+    strictly worse than no file at all.
+    """
+    text = path.read_text()
+    for key, value in values.items():
+        text = text.replace(f"@{key}@", value)
+    leftover = re.search(r"@[A-Z_][A-Z0-9_]*@", text)
+    if leftover:
+        raise ValueError(f"{path}: {leftover.group(0)} survived substitution")
+    return text
+
+
+def service_file_for(dirname: str) -> tuple[Path, str]:
+    """(path, expected content) of this runner's launchd plist / systemd unit."""
+    runner_dir = RUNNER_BASE / dirname
+    if IS_MAC:
+        label = f"com.github.actions-runner.{dirname}"
+        return (
+            Path.home() / "Library/LaunchAgents" / f"{label}.plist",
+            render_template(
+                TEMPLATE_DIR / "com.github.actions-runner.plist.in",
+                LABEL=label,
+                RUNNER_DIR=str(runner_dir),
+                BASE_DIR=str(RUNNER_BASE),
+                HOME=str(Path.home()),
+            ),
+        )
+    return (
+        Path.home() / ".config/systemd/user" / f"github-runner-{dirname}.service",
+        render_template(
+            TEMPLATE_DIR / "github-runner.service.in",
+            RUNNER_NAME=f"{short_hostname()}-{dirname}",
+            RUNNER_DIR=str(runner_dir),
+        ),
+    )
+
+
+def service_drift(dirnames) -> list[tuple[str, Path, str]]:
+    """Runners whose service file no longer matches the template.
+
+    This is the gap that let a host carry an old unit forever: both installers
+    skip an already-configured runner, so a service file written by an earlier
+    kit was never rewritten. One host's runners kept `Restart=on-failure` and
+    `KillMode=process` long after the template moved to `Restart=always`, and
+    silently failed to come back from a reboot — the listener exits 0 on
+    self-update, which on-failure does not restart.
+
+    A MISSING file is not drift and is skipped: installing one is the
+    installer's job, and rewriting a file for a runner that was never set up
+    here would resurrect something convergence had deliberately removed.
+    """
+    out = []
+    for dn in sorted(dirnames):
+        path, expected = service_file_for(dn)
+        if not path.is_file():
+            continue
+        if path.read_text() != expected:
+            out.append((dn, path, expected))
+    return out
+
+
+def apply_service_rewrites(drift, reregistered, *, is_busy=None) -> int:
+    """Rewrite drifted service files and restart, skipping busy runners.
+
+    Busy is re-checked here rather than trusted from the run-start snapshot, for
+    the same reason apply_env_restarts does it: a restart is an unconditional
+    kill+relaunch and acting on stale busy state kills a job mid-flight.
+
+    On systemd the unit is reloaded and re-enabled, not merely restarted: the
+    drift that motivated this left units DISABLED with their listeners detached,
+    so a plain restart would have fixed the file and left the host still unable
+    to come back from a reboot.
+    """
+    if is_busy is None:
+
+        def is_busy(dn):
+            return runner_fleet.is_busy(
+                RUNNER_BASE / dn, runner_fleet.worker_cmdlines()
+            )
+
+    failed = 0
+    reloaded = False
+    for dn, path, expected in drift:
+        if dn not in reregistered and is_busy(dn):
+            continue  # retry next tick; drift is not urgent enough to kill a job
+        path.write_text(expected)
+        print(f"  service file rewritten from template: {path.name}")
+        if IS_MAC:
+            if not _svc_restart(dn):
+                print(f"  ! {dn}: restart after service rewrite failed")
+                failed += 1
+            continue
+        if not reloaded:
+            _run(["systemctl", "--user", "daemon-reload"])
+            reloaded = True
+        unit = f"github-runner-{dn}.service"
+        if _run(["systemctl", "--user", "enable", "--now", unit]) != 0:
+            print(f"  ! {dn}: enable --now after service rewrite failed")
+            failed += 1
+        elif _run(["systemctl", "--user", "restart", unit]) != 0:
+            print(f"  ! {dn}: restart after service rewrite failed")
+            failed += 1
+    return failed
+
+
 def _svc_stop_remove(dirname: str) -> None:
     """Stop and delete the launchd/systemd unit for a runner dir. Best effort."""
     if IS_MAC:
@@ -1013,6 +1125,15 @@ def main() -> int:
                 if new_text is not None:
                     env_work.append((dn, new_text))
 
+        # Service files converge for EVERY repo, not just the gated one: a unit
+        # or plist written by an older kit is never rewritten by the installers,
+        # which skip an already-configured runner. That is how a host ends up
+        # carrying Restart=on-failure long after the template moved on, and
+        # silently fails to come back from a reboot. Dirs already leaving are
+        # skipped for the same reason .env skips them.
+        leaving_svc = set(plan.to_remove) | set(plan.to_cleanup)
+        svc_work = service_drift(set(local_dirs) - leaving_svc)
+
         # Labels converge independently of the runner-count plan: a host can be
         # perfectly in sync on counts and still be missing a label added to
         # runners.toml after its runners were registered. Skipped under
@@ -1027,6 +1148,7 @@ def main() -> int:
             or plan.to_remove
             or plan.to_cleanup
             or env_work
+            or svc_work
             or labels_added
         )
 
@@ -1055,6 +1177,9 @@ def main() -> int:
         for dn, _ in env_work:
             state = "busy — deferring" if dn in busy_dirs else "restart"
             print(f"[{repo}] converge .env in {dn} ({state})")
+        for dn, path, _ in svc_work:
+            state = "busy — deferring" if dn in busy_dirs else "rewrite + restart"
+            print(f"[{repo}] converge {path.name} ({state})")
 
         if args.dry_run:
             continue
@@ -1070,8 +1195,11 @@ def main() -> int:
             remove_runner(repo, dn)
         for dn in plan.to_cleanup:
             cleanup_dead(dn)
-        # .env last: a just-re-registered runner was restarted above and is idle.
+        # Service files before .env: both end in a restart, and doing the
+        # service first means a dir needing both is restarted once by .env
+        # rather than twice.
         reregistered = set(plan.to_reregister)
+        failed += apply_service_rewrites(svc_work, reregistered)
         failed += apply_env_restarts(env_work, reregistered)
 
     # Hung-listener sweep. Runs after every repo has been converged so a restart
