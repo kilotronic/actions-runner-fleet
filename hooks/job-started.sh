@@ -81,8 +81,16 @@ if command -v systemd-inhibit >/dev/null 2>&1; then
   INHIBIT_PID=$!
   # `cmd &` reports only that the fork happened, so it cannot tell us whether
   # the inhibitor was actually granted — a denied systemd-inhibit exits
-  # immediately. Give it a moment, then check the process is still there.
-  sleep 0.2
+  # immediately.
+  # Poll, do not sample once: a refused inhibitor exits within milliseconds of
+  # STARTING, and a single fixed sleep cannot tell "has not started yet" from
+  # "is holding". Sampling once failed 4 of 12 runs of the job-completed sandbox
+  # test, always in the dangerous direction — claiming an inhibitor that was
+  # refused, which is the silent failure this block exists to prevent.
+  for _ in 1 2 3 4 5; do
+    sleep 0.1
+    kill -0 "$INHIBIT_PID" 2>/dev/null || break
+  done
   if kill -0 "$INHIBIT_PID" 2>/dev/null; then
     echo "systemd-inhibit PID $INHIBIT_PID — blocking idle-suspend for job worker $WORKER_PID"
   else
@@ -92,9 +100,12 @@ elif command -v caffeinate >/dev/null 2>&1; then
   WORKER_PID="${PPID:-$$}"
   caffeinate -i -s -w "$WORKER_PID" >/dev/null 2>&1 &
   INHIBIT_PID=$!
-  # Same "did the fork actually take" check as the systemd branch: caffeinate
+  # Same check, and the same polling, as the systemd branch above: caffeinate
   # exits immediately if $WORKER_PID is already gone or unwaitable.
-  sleep 0.2
+  for _ in 1 2 3 4 5; do
+    sleep 0.1
+    kill -0 "$INHIBIT_PID" 2>/dev/null || break
+  done
   if kill -0 "$INHIBIT_PID" 2>/dev/null; then
     echo "caffeinate PID $INHIBIT_PID — blocking idle-sleep for job worker $WORKER_PID"
   else

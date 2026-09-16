@@ -99,7 +99,18 @@ if command -v systemd-inhibit >/dev/null 2>&1; then
         --who="actions-runner" --why="post-job grace" \
         sleep 900 >/dev/null 2>&1 &
       grace_pid=$!
-      sleep 0.2
+      # Poll, do not sample once. A refused inhibitor exits within milliseconds
+      # of STARTING, but it may not have started when a single fixed sleep
+      # elapses — and then "still alive" means "not started yet", not "holding".
+      # Sampling once at 0.2s reported a refused grace as held in 4 of 12 runs of
+      # the sandbox test. That is the dangerous direction: the hook claims a
+      # grace it does not have, which is the exact silent failure it exists to
+      # prevent. Five samples over the same window catch the exit wherever it
+      # falls instead of at one arbitrary instant.
+      for _ in 1 2 3 4 5; do
+        sleep 0.1
+        kill -0 "$grace_pid" 2>/dev/null || break
+      done
       if kill -0 "$grace_pid" 2>/dev/null; then
         echo "systemd-inhibit PID $grace_pid — post-job idle-suspend grace (900s)"
       else
