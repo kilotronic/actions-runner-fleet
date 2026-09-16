@@ -14,6 +14,10 @@
 #   wedged+confirmed  -> idle host, all three probes hang: stop + start
 #   busy-mid-backoff  -> idle at the first gate, busy by the second: no stop
 #   lock-held         -> bails immediately rather than waiting out the holder
+#   ready-budget      -> the post-start wait is bounded by wall clock, not by
+#                        60 iterations of a probe that each hang for a full box
+#   orb-status-hang   -> a `orb status` that never answers is not read as
+#                        "Stopped", so a slow box is not mistaken for a down one
 #
 # Probe boxes are shrunk via ORB_PROBE_* / ORB_PATIENCE_* so the suite runs in
 # seconds instead of waiting out real 10s/25s/60s timeouts.
@@ -31,6 +35,7 @@ FAILURES=0
 #   0-1 fast probe (hangs) | 1-2 slow probe (hangs) | 2 first busy gate
 #   2-5 backoff            | 5-7 patient probe     | 7 second busy gate
 export ORB_PROBE_FAST=1 ORB_PROBE_SLOW=1 ORB_PATIENCE_DELAY=3 ORB_PATIENCE_PROBE=2
+export ORB_PROBE_ORB=1 ORB_READY_BUDGET=3
 
 # _sandbox <docker-mode> <orb-status> <socket|nosocket> <after-start-mode>
 # Builds a fake $HOME with stub docker/orb driven by files under state/, and
@@ -48,19 +53,28 @@ _sandbox() {
   echo "$after_start" >"$state/after-start-mode"
   : >"$state/orb-calls"
 
+  # Both stubs hang with `exec sleep`, never a plain call. _timed kills the
+  # process it forked, so a bash wrapper around the sleep would leave the sleep
+  # itself orphaned — and an orphan holds a command substitution's pipe open,
+  # which makes `st="$(_timed ...)"` block for the whole 600s however promptly
+  # the probe was killed. (Keep prose like this OUT of the heredocs below: they
+  # expand, so a backtick or $( ) in a comment executes while the stub is
+  # written.)
   cat >"$sb/home/.orbstack/bin/docker" <<EOF
 #!/usr/bin/env bash
 mode="\$(cat "$state/docker-mode")"
 case "\$mode" in
   ok)    exit 0 ;;
   down)  exit 1 ;;
-  wedge) sleep 600 ;;
+  wedge) exec sleep 600 ;;
 esac
 EOF
   cat >"$sb/home/.orbstack/bin/orb" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
-  status) cat "$state/orb-status" ;;
+  # orb-status HANG = the wedged transport: status never answers at all,
+  # rather than answering Stopped.
+  status) st="\$(cat "$state/orb-status")"; [[ "\$st" == HANG ]] && exec sleep 600; echo "\$st" ;;
   stop)   echo stop >> "$state/orb-calls" ;;
   start)  echo start >> "$state/orb-calls"; cat "$state/after-start-mode" > "$state/docker-mode" ;;
 esac
@@ -239,6 +253,31 @@ mkdir -p "$SB/home/actions-runner/logs"
 _run "$SB"
 _assert breaker-expiry "grep -q 'wedge CONFIRMED' $SB/out" "stale restarts do not count"
 _assert breaker-expiry "grep -q '^stop$' $SB/state/orb-calls" "still recovers a real wedge"
+
+# 12. The post-start readiness wait is bounded by WALL CLOCK, not by an
+#     iteration count. `orb start` here leaves the daemon wedged, so every probe
+#     inside the wait hangs for a full ORB_PROBE_FAST box. The old loop was
+#     `for _ in $(seq 1 60)` around that probe, so it ran 60 x (1s + 1s) = 120s
+#     at these timings — ~11 minutes at production ones — and then reported
+#     "did not become ready within 60s".
+SB=$(_sandbox down Stopped nosocket wedge)
+_t0=$(date +%s)
+_run "$SB"
+_elapsed=$(($(date +%s) - _t0))
+_assert ready-budget "grep -q 'cleanly down' $SB/out" "takes the down branch"
+_assert ready-budget "((_elapsed < 20))" "gave up after ${_elapsed}s, not 60 hung probes"
+_assert ready-budget "grep -q 'gave up after' $SB/out" "reports elapsed time, not a hardcoded 60s"
+
+# 13. `orb status` can hang on the same wedged transport `docker info` does. A
+#     killed probe yields an empty string, which is indistinguishable from a
+#     real "Stopped" — reading it as one declared a wedged box "cleanly down"
+#     and issued a bare `orb start`, which recovers nothing. The timeout must
+#     fall through to the wedged path instead, which stops before starting.
+SB=$(_sandbox wedge HANG socket ok)
+_run "$SB"
+_assert orb-status-hang "! grep -q 'cleanly down' $SB/out" "a killed status probe is not an answer"
+_assert orb-status-hang "grep -q 'wedge CONFIRMED' $SB/out" "falls through to the wedged path"
+_assert orb-status-hang "grep -q '^stop$' $SB/state/orb-calls" "recovers with stop+start, not a bare start"
 
 echo
 if ((FAILURES > 0)); then
