@@ -128,6 +128,12 @@ def test_convergence_may_resync_the_rule_but_never_create_it() -> None:
     body = (REPO / "update-host.sh").read_text()
     assert '-f "$POLKIT_DEST"' in body
     assert "POLKIT_TEMPLATE=polkit/49-actions-runner-inhibit.rules.in" in body
+    # And it must ask about the destination AS ROOT. /etc/polkit-1/rules.d is
+    # 0750 root:polkitd on a stock install, so a plain `[[ -f ]]` as the runner
+    # user answers "absent" whether the rule is there or not — which silently
+    # disabled this re-sync on every host that actually had the rule.
+    assert 'sudo -n test -f "$POLKIT_DEST"' in body
+    assert '[[ -f "$POLKIT_DEST"' not in body
     # The old, broken shape must not come back.
     assert "POLKIT_RULE=polkit/49-actions-runner-inhibit.rules\n" not in body
 
@@ -261,3 +267,40 @@ def test_a_missing_rules_dir_without_polkit_is_refused(
     # Nothing created: a refusal that half-acts is worse than one that does not.
     assert not dest.exists()
     assert not dest.parent.exists()
+
+
+def test_the_destination_is_only_ever_read_as_root() -> None:
+    """A stock polkit install makes /etc/polkit-1/rules.d 0750 root:polkitd.
+
+    Any test against the rule run as the runner user therefore answers "absent"
+    whether it is there or not. That is not cosmetic: it made the installer
+    reinstall on every run instead of reporting "already current", and it made
+    update-host.sh's re-sync dead on exactly the hosts that had the rule.
+
+    Structural, because a stubbed sudo runs as the same user and cannot
+    reproduce a directory that user may not traverse.
+    """
+    body = SCRIPT.read_text()
+    assert 'sudo cmp -s - "$DEST"' in body
+    # Comments may quote the broken spelling while explaining it; only real code
+    # counts. (Checking the raw text flagged this test's own docstring.)
+    code = "\n".join(ln.split("#", 1)[0] for ln in body.splitlines())
+    assert '[[ -f "$DEST" ]]' not in code
+    assert "diff -q <(" not in code
+
+
+def test_privileged_steps_report_what_failed() -> None:
+    """One combined `install` call meant one bare message stood for four faults.
+
+    `install: No such file or directory` named neither the step, the path, nor
+    the underlying error — and two fixes were aimed at the wrong cause because
+    of it.
+    """
+    body = SCRIPT.read_text()
+    assert "_sudo_step" in body
+    for step in ("mkdir -p", "cp ", "chmod 644", "chown root:root"):
+        assert step in body, step
+    # Each failure names the step, the command it ran, and the tool's own words.
+    assert "FAILED: $what" in body
+    assert 'echo "  ran:  sudo $*"' in body
+    assert 'echo "  said: $out"' in body

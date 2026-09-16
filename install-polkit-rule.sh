@@ -113,7 +113,33 @@ fi
 
 _require_linux
 
-if [[ -f "$DEST" ]] && diff -q <(printf '%s\n' "$rendered") "$DEST" >/dev/null 2>&1; then
+# Every privileged step goes through this, so a failure names the step, the
+# command, and what the tool actually said. The bare `install: No such file or
+# directory` this replaced named none of the three, and two fixes were aimed at
+# the wrong cause because of it.
+_sudo_step() {
+  local what=$1
+  shift
+  local out rc=0
+  out="$(sudo "$@" 2>&1)" || rc=$?
+  if ((rc)); then
+    echo "FAILED: $what" >&2
+    echo "  ran:  sudo $*" >&2
+    [[ -n "$out" ]] && echo "  said: $out" >&2
+    return "$rc"
+  fi
+  return 0
+}
+
+# $DEST sits in a root-only directory on a stock polkit install
+# (/etc/polkit-1/rules.d is 0750 root:polkitd), so `[[ -f "$DEST" ]]` run as the
+# runner user is false whether the rule is there or not. Everything that asks
+# about the destination must ask as root, or it silently answers "absent": this
+# script would reinstall on every run, and update-host.sh's re-sync — gated on
+# the same test — would never fire at all.
+_dest_matches() { printf '%s\n' "$rendered" | sudo cmp -s - "$DEST" 2>/dev/null; }
+
+if _dest_matches; then
   echo "already current: $DEST (user: $RUNNER_USER)"
   exit 0
 fi
@@ -138,9 +164,7 @@ _polkit_present() {
 POLKIT_DIR="$(dirname "$DEST")"
 if [[ ! -d "$POLKIT_DIR" ]]; then
   if _polkit_present; then
-    # polkit is here, just without a rules.d yet.
-    sudo install -d -m 755 -o root -g root "$POLKIT_DIR"
-    echo "created $POLKIT_DIR"
+    : # created below, alongside the other privileged steps
   else
     echo "refusing: polkit is not installed ($POLKIT_DIR does not exist)." >&2
     echo "A rule written there would be read by nothing. Install polkit first:" >&2
@@ -165,10 +189,18 @@ _tmp_rule="$(mktemp)"
 trap 'rm -f "$_tmp_rule"' EXIT
 printf '%s\n' "$rendered" >"$_tmp_rule"
 
-if ! sudo install -m 644 -o root -g root "$_tmp_rule" "$DEST"; then
-  echo "failed to install $DEST" >&2
-  echo "  parent dir exists: $([[ -d "$POLKIT_DIR" ]] && echo yes || echo NO)" >&2
-  echo "  sudo works:        $(sudo -n true 2>/dev/null && echo yes || echo "needs a password or is denied")" >&2
+# Discrete steps, each reported on its own: one combined `install` call meant one
+# bare message had to stand for a missing parent, an unwritable target, a sudo
+# denial and an unresolvable owner.
+_sudo_step "create $POLKIT_DIR" mkdir -p "$POLKIT_DIR" || exit 1
+_sudo_step "copy the rule to $DEST" cp "$_tmp_rule" "$DEST" || exit 1
+_sudo_step "set mode 0644 on $DEST" chmod 644 "$DEST" || exit 1
+_sudo_step "set owner root:root on $DEST" chown root:root "$DEST" || exit 1
+
+# Read it back as root. An install that reports success without the rule landing
+# is the failure mode this whole script exists to remove.
+if ! _dest_matches; then
+  echo "FAILED: $DEST does not match the rendered rule after install" >&2
   exit 1
 fi
 echo "installed $DEST (user: $RUNNER_USER)"

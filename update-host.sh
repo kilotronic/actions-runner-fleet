@@ -123,13 +123,25 @@ case "$(uname -s)" in
     # stays here rather than moving into apply.py.
     POLKIT_TEMPLATE=polkit/49-actions-runner-inhibit.rules.in
     POLKIT_DEST=/etc/polkit-1/rules.d/49-actions-runner-inhibit.rules
-    if [[ -f "$POLKIT_DEST" && -f "$POLKIT_TEMPLATE" ]]; then
+    # Every test against $POLKIT_DEST goes through sudo. On a stock polkit
+    # install /etc/polkit-1/rules.d is 0750 root:polkitd, so `[[ -f ]]` as the
+    # runner user is false whether the rule is there or not — which made this
+    # re-sync a no-op on exactly the hosts that have the rule. sudo -n
+    # throughout: a host without passwordless sudo reports absent and skips,
+    # which is the fail-safe direction and matches the note above.
+    if [[ -f "$POLKIT_TEMPLATE" ]] && sudo -n test -f "$POLKIT_DEST" 2>/dev/null; then
       POLKIT_RENDERED="$(sed "s/@RUNNER_USER@/$(id -un)/g" "$POLKIT_TEMPLATE")"
-      if ! printf '%s\n' "$POLKIT_RENDERED" | cmp -s - "$POLKIT_DEST"; then
-        printf '%s\n' "$POLKIT_RENDERED" \
-          | sudo -n install -m 644 -o root -g root /dev/stdin "$POLKIT_DEST" 2>/dev/null \
-          && echo "re-rendered polkit inhibitor rule -> $POLKIT_DEST" \
-          || echo "warning: could not update $POLKIT_DEST (sudo -n denied?)"
+      if ! printf '%s\n' "$POLKIT_RENDERED" | sudo -n cmp -s - "$POLKIT_DEST" 2>/dev/null; then
+        POLKIT_TMP="$(mktemp)"
+        printf '%s\n' "$POLKIT_RENDERED" >"$POLKIT_TMP"
+        if sudo -n cp "$POLKIT_TMP" "$POLKIT_DEST" 2>/dev/null \
+          && sudo -n chmod 644 "$POLKIT_DEST" 2>/dev/null \
+          && sudo -n chown root:root "$POLKIT_DEST" 2>/dev/null; then
+          echo "re-rendered polkit inhibitor rule -> $POLKIT_DEST"
+        else
+          echo "warning: could not update $POLKIT_DEST (sudo -n denied?)"
+        fi
+        rm -f "$POLKIT_TMP"
       fi
     fi
     ;;
