@@ -92,7 +92,6 @@ def test_an_empty_username_is_refused_by_the_argument_parser() -> None:
 
 
 def test_dry_run_never_writes(tmp_path: Path) -> None:
-    path, log = stub_sudo
     dest = tmp_path / "rule.rules"
     proc = run("--dry-run", "--user", "ci", dest=dest)
     assert proc.returncode == 0
