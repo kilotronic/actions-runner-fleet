@@ -1,0 +1,27 @@
+// Allow the runner user to take logind BLOCK inhibitor locks.
+//
+// The Linux job hooks hold `systemd-inhibit --what=sleep --mode=block` for the
+// lifetime of a job, and hooks/job-completed.sh holds a post-job grace, so an
+// idle-suspend policy cannot suspend the box mid-job or between jobs. polkit's
+// default for inhibit-block-* is auth_admin for a process outside an active
+// login session — which is exactly what the runner service is — so without this
+// rule the hooks' inhibitors are denied and the hooks warn:
+//
+//     warning: sleep inhibitor was refused; this box may suspend mid-job
+//
+// Scope: grants ONLY block:sleep and block:idle, ONLY to @RUNNER_USER@. No
+// other logind action, no escalation, nothing about other users.
+//
+// GENERATED from polkit/49-actions-runner-inhibit.rules.in by
+// install-polkit-rule.sh. Edit the template, not this copy: update-host.sh
+// re-renders the template on each convergence pass and reinstalls if the two
+// have drifted.
+polkit.addRule(function (action, subject) {
+  if (
+    (action.id == "org.freedesktop.login1.inhibit-block-sleep" ||
+      action.id == "org.freedesktop.login1.inhibit-block-idle") &&
+    subject.user == "@RUNNER_USER@"
+  ) {
+    return polkit.Result.YES;
+  }
+});

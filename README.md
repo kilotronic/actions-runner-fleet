@@ -78,6 +78,7 @@ before it plays.
 | `status.sh`                       | Report runners, container runtime and (if present) a CI database container    |
 | `runner-status.30s.py`            | SwiftBar menu bar plugin showing live fleet status (macOS)                    |
 | `install-menubar.sh`              | Install the SwiftBar plugin above                                             |
+| `install-polkit-rule.sh`          | Opt-in: let the runner user hold logind sleep inhibitors (Linux)             |
 | `exclude-ci-paths.sh`             | Keep Spotlight / Time Machine / Photos off the CI work trees (macOS)          |
 | `reclaim-ci-disk.sh`              | Thin Time Machine local snapshots when a CI host runs low on disk (macOS)     |
 | `prune.sh`                        | Reclaim runner disk: stale `_diag` logs and idle `_work/_temp` (dry-run by default) |
@@ -148,25 +149,33 @@ active session, as on a headless machine nobody is logged in to. On a machine
 that never suspends, the warning is harmless.
 
 Otherwise, allow the runner user to take sleep inhibitors — and nothing else —
-with a polkit rule. Run this as the runner user; it installs polkit if the
-machine does not have it, and writes the rule for the current `$USER`:
+with a polkit rule. Run this once per host, as the runner user:
 
 ```sh
-sudo apt-get install -y polkitd
-sudo tee /etc/polkit-1/rules.d/49-actions-runner-inhibit.rules >/dev/null <<EOF
-polkit.addRule(function (action, subject) {
-  if ((action.id == "org.freedesktop.login1.inhibit-block-sleep" ||
-       action.id == "org.freedesktop.login1.inhibit-block-idle") &&
-      subject.user == "$USER") {
-    return polkit.Result.YES;
-  }
-});
-EOF
+./install-polkit-rule.sh              # for the current user
+./install-polkit-rule.sh --dry-run    # print the exact rule first, change nothing
+./install-polkit-rule.sh --user ci    # for a different runner user
+./install-polkit-rule.sh --uninstall  # remove it
 ```
 
-polkit reads the rule immediately; the next job's hooks hold their inhibitors.
-This kit does not install the rule for you: it is a privileged policy change, and
-many machines do not need it.
+It renders `polkit/49-actions-runner-inhibit.rules.in` for that user and installs
+it to `/etc/polkit-1/rules.d/`. polkit reads `rules.d` immediately, so the next
+job's hooks hold their inhibitors. The rule grants **only** `inhibit-block-sleep`
+and `inhibit-block-idle`, and only to that one user.
+
+Installing is a deliberate, explicit act: it is a privileged policy change, and a
+machine that never suspends does not need it. So no installer runs it for you,
+and `update-host.sh` will never create the rule — it only keeps an
+already-installed one in sync with the template, so editing the template and
+letting convergence carry it is the supported way to change it.
+
+`--dry-run` works anywhere, including macOS, so you can read the exact rule
+before granting anything. If polkit itself is missing the script says so
+(Debian/Ubuntu: `sudo apt-get install -y polkitd`).
+
+**Checking it over SSH is misleading** — SSH opens a login session, so the
+inhibitor is granted while you look. Read a job log for
+`sleep inhibitor was refused` instead.
 
 ## Hung listeners
 
