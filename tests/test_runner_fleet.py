@@ -36,14 +36,14 @@ def write_runner_file(dirpath, github_url, agent_name=None):
 class RepoFromGhUrlTest(unittest.TestCase):
     def test_parses_owner_repo(self):
         self.assertEqual(
-            runner_fleet._repo_from_gh_url("https://github.com/o/partygame"),
-            "o/partygame",
+            runner_fleet._repo_from_gh_url("https://github.com/o/app"),
+            "o/app",
         )
 
     def test_tolerates_trailing_slash(self):
         self.assertEqual(
-            runner_fleet._repo_from_gh_url("https://github.com/o/partygame/"),
-            "o/partygame",
+            runner_fleet._repo_from_gh_url("https://github.com/o/app/"),
+            "o/app",
         )
 
     def test_none_on_unrecognized_url(self):
@@ -59,22 +59,22 @@ class DiscoverRunnersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             write_runner_file(
-                base / "partygame-1",
-                "https://github.com/o/partygame",
-                agent_name="host-a-partygame-1",
+                base / "app-1",
+                "https://github.com/o/app",
+                agent_name="host-a-app-1",
             )
             runners = runner_fleet.discover_runners(base_dir=base)
             self.assertEqual(len(runners), 1)
             r = runners[0]
-            self.assertEqual(r.dir, base / "partygame-1")
-            self.assertEqual(r.repo, "o/partygame")
-            self.assertEqual(r.name, "host-a-partygame-1")
+            self.assertEqual(r.dir, base / "app-1")
+            self.assertEqual(r.repo, "o/app")
+            self.assertEqual(r.name, "host-a-app-1")
 
     def test_dir_without_runner_file_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            (base / "partygame-1").mkdir()  # bare: config.sh only, no .runner
-            (base / "partygame-1" / "config.sh").touch()
+            (base / "app-1").mkdir()  # bare: config.sh only, no .runner
+            (base / "app-1" / "config.sh").touch()
             self.assertEqual(runner_fleet.discover_runners(base_dir=base), [])
 
     def test_non_directory_entries_are_skipped(self):
@@ -94,19 +94,19 @@ class DiscoverRunnersTest(unittest.TestCase):
         # it just can't be attributed to a repo.
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            d = base / "partygame-1"
+            d = base / "app-1"
             d.mkdir()
             (d / ".runner").write_text("{not json")
             runners = runner_fleet.discover_runners(base_dir=base)
             self.assertEqual(len(runners), 1)
             self.assertEqual(runners[0].dir, d)
             self.assertIsNone(runners[0].repo)
-            self.assertEqual(runners[0].name, "partygame-1")  # falls back to dirname
+            self.assertEqual(runners[0].name, "app-1")  # falls back to dirname
 
     def test_unrecognized_github_url_yields_no_repo(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            write_runner_file(base / "partygame-1", "not-a-github-url")
+            write_runner_file(base / "app-1", "not-a-github-url")
             runners = runner_fleet.discover_runners(base_dir=base)
             self.assertEqual(len(runners), 1)
             self.assertIsNone(runners[0].repo)
@@ -114,18 +114,18 @@ class DiscoverRunnersTest(unittest.TestCase):
     def test_missing_agent_name_falls_back_to_dirname(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            write_runner_file(base / "partygame-1", "https://github.com/o/partygame")
+            write_runner_file(base / "app-1", "https://github.com/o/app")
             runners = runner_fleet.discover_runners(base_dir=base)
-            self.assertEqual(runners[0].name, "partygame-1")
+            self.assertEqual(runners[0].name, "app-1")
 
     def test_multiple_runners_sorted_by_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            write_runner_file(base / "partygame-2", "https://github.com/o/partygame")
-            write_runner_file(base / "partygame-1", "https://github.com/o/partygame")
+            write_runner_file(base / "app-2", "https://github.com/o/app")
+            write_runner_file(base / "app-1", "https://github.com/o/app")
             runners = runner_fleet.discover_runners(base_dir=base)
             self.assertEqual(
-                [r.dir.name for r in runners], ["partygame-1", "partygame-2"]
+                [r.dir.name for r in runners], ["app-1", "app-2"]
             )
 
     def test_default_base_dir_is_home_actions_runner(self):
@@ -134,65 +134,65 @@ class DiscoverRunnersTest(unittest.TestCase):
 
 class IsBusyTest(unittest.TestCase):
     def test_true_when_worker_cmdline_under_runner_dir(self):
-        workers = ["/Users/j/actions-runner/partygame-1/bin/Runner.Worker 1 2"]
+        workers = ["/Users/j/actions-runner/app-1/bin/Runner.Worker 1 2"]
         self.assertTrue(
-            runner_fleet.is_busy(Path("/Users/j/actions-runner/partygame-1"), workers)
+            runner_fleet.is_busy(Path("/Users/j/actions-runner/app-1"), workers)
         )
 
     def test_false_when_no_matching_worker(self):
-        workers = ["/Users/j/actions-runner/partygame-2/bin/Runner.Worker 1 2"]
+        workers = ["/Users/j/actions-runner/app-2/bin/Runner.Worker 1 2"]
         self.assertFalse(
-            runner_fleet.is_busy(Path("/Users/j/actions-runner/partygame-1"), workers)
+            runner_fleet.is_busy(Path("/Users/j/actions-runner/app-1"), workers)
         )
 
     def test_false_with_no_workers(self):
         self.assertFalse(
-            runner_fleet.is_busy(Path("/Users/j/actions-runner/partygame-1"), [])
+            runner_fleet.is_busy(Path("/Users/j/actions-runner/app-1"), [])
         )
 
     def test_index_prefix_collision_does_not_match(self):
-        # partygame-1's needle must not match partygame-10's worker.
-        workers = ["/Users/j/actions-runner/partygame-10/bin/Runner.Worker 1 2"]
+        # app-1's needle must not match app-10's worker.
+        workers = ["/Users/j/actions-runner/app-10/bin/Runner.Worker 1 2"]
         self.assertFalse(
-            runner_fleet.is_busy(Path("/Users/j/actions-runner/partygame-1"), workers)
+            runner_fleet.is_busy(Path("/Users/j/actions-runner/app-1"), workers)
         )
 
     def test_accepts_runner_namedtuple(self):
         r = runner_fleet.Runner(
-            dir=Path("/x/actions-runner/partygame-1"), name="n", repo="o/r"
+            dir=Path("/x/actions-runner/app-1"), name="n", repo="o/r"
         )
-        workers = ["/x/actions-runner/partygame-1/bin/Runner.Worker"]
+        workers = ["/x/actions-runner/app-1/bin/Runner.Worker"]
         self.assertTrue(runner_fleet.is_busy(r, workers))
 
     def test_workers_none_scans_live_processes(self):
         with mock.patch.object(
             runner_fleet,
             "worker_cmdlines",
-            return_value=["/x/actions-runner/partygame-1/bin/Runner.Worker"],
+            return_value=["/x/actions-runner/app-1/bin/Runner.Worker"],
         ):
-            self.assertTrue(runner_fleet.is_busy(Path("/x/actions-runner/partygame-1")))
+            self.assertTrue(runner_fleet.is_busy(Path("/x/actions-runner/app-1")))
 
 
 class WorkerCmdlinesTest(unittest.TestCase):
     def test_filters_to_runner_worker_lines_only(self):
         fake_stdout = (
             "/usr/bin/some-other-process\n"
-            "/x/actions-runner/partygame-1/bin/Runner.Worker 1 2\n"
+            "/x/actions-runner/app-1/bin/Runner.Worker 1 2\n"
             "/bin/zsh\n"
         )
         with mock.patch.object(runner_fleet.subprocess, "run") as run:
             run.return_value = mock.Mock(stdout=fake_stdout)
             out = runner_fleet.worker_cmdlines()
-        self.assertEqual(out, ["/x/actions-runner/partygame-1/bin/Runner.Worker 1 2"])
+        self.assertEqual(out, ["/x/actions-runner/app-1/bin/Runner.Worker 1 2"])
 
 
 class MainJsonTest(unittest.TestCase):
     def test_json_output_shape(self):
         fake_runners = [
             runner_fleet.Runner(
-                dir=Path("/x/actions-runner/partygame-1"),
-                name="host-a-partygame-1",
-                repo="o/partygame",
+                dir=Path("/x/actions-runner/app-1"),
+                name="host-a-app-1",
+                repo="o/app",
             )
         ]
         with (
@@ -210,9 +210,9 @@ class MainJsonTest(unittest.TestCase):
             data,
             [
                 {
-                    "dir": "/x/actions-runner/partygame-1",
-                    "name": "host-a-partygame-1",
-                    "repo": "o/partygame",
+                    "dir": "/x/actions-runner/app-1",
+                    "name": "host-a-app-1",
+                    "repo": "o/app",
                     "busy": False,
                 }
             ],
@@ -221,10 +221,10 @@ class MainJsonTest(unittest.TestCase):
     def test_json_output_marks_busy_runner(self):
         fake_runners = [
             runner_fleet.Runner(
-                dir=Path("/x/actions-runner/partygame-1"), name="n", repo="o/r"
+                dir=Path("/x/actions-runner/app-1"), name="n", repo="o/r"
             )
         ]
-        workers = ["/x/actions-runner/partygame-1/bin/Runner.Worker"]
+        workers = ["/x/actions-runner/app-1/bin/Runner.Worker"]
         with (
             mock.patch.object(
                 runner_fleet, "discover_runners", return_value=fake_runners
@@ -242,7 +242,7 @@ class MainAnyBusyTest(unittest.TestCase):
     def _run(self, workers):
         fake_runners = [
             runner_fleet.Runner(
-                dir=Path("/x/actions-runner/partygame-1"), name="n", repo="o/r"
+                dir=Path("/x/actions-runner/app-1"), name="n", repo="o/r"
             )
         ]
         with (
@@ -257,7 +257,7 @@ class MainAnyBusyTest(unittest.TestCase):
         return rc, out.getvalue()
 
     def test_exit_0_when_a_runner_is_busy(self):
-        rc, printed = self._run(["/x/actions-runner/partygame-1/bin/Runner.Worker"])
+        rc, printed = self._run(["/x/actions-runner/app-1/bin/Runner.Worker"])
         self.assertEqual(rc, 0)
         self.assertEqual(printed, "")
 

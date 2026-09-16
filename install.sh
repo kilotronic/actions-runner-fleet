@@ -233,7 +233,7 @@ PYTEST_XDIST_AUTO_NUM_WORKERS=${XDIST_AUTO_WORKERS}
 ENV
 
   # Bake the host's CI slot count (from apply.py, sourced from runners.toml) so
-  # partygame's with_ci_slot.py admission gate uses the right per-host capacity.
+  # the repo's in-job admission gate uses the right per-host capacity.
   # Only when set: an empty CI_SLOTS= line would make int("") raise in that script.
   if [[ -n "${CI_SLOTS:-}" ]]; then
     echo "CI_SLOTS=${CI_SLOTS}" >>"$RUNNER_DIR/.env"

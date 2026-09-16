@@ -53,14 +53,14 @@ def is_busy(runner, workers=None):
 
     The fleet's one busy signal: process presence. `runner` is a Runner (from
     discover_runners) or a bare directory path. Matched by directory-plus-
-    separator in the worker's argv, so partygame-1 never matches partygame-10's
+    separator in the worker's argv, so app-1 never matches app-10's
     worker. `workers` is an injected list of `ps` command-line strings — pass a
     fake list in tests; real callers omit it and a live `ps -A -o command=`
     scan is used.
 
     **Caveats:** The match is an unanchored substring over the full cmdline,
     so a process merely referencing the runner dir path (e.g. `tail -f
-    .../partygame-1/_diag/Runner.Worker....log`) counts as busy — fail-safe
+    .../app-1/_diag/Runner.Worker....log`) counts as busy — fail-safe
     direction that defers action. The job-assigned-but-worker-not-yet-spawned
     window reads as idle; removals are backstopped by GitHub's server-side busy
     rejection in config.sh remove; the .env restart path re-checks immediately

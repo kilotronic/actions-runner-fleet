@@ -65,7 +65,7 @@ CI_PG_PORT="${CI_PG_PORT:-5433}"
 # flake timing-sensitive UI tests. Half the cores (min 2) keeps unit-test
 # parallelism high while giving each browser headroom. pytest-xdist reads this env.
 XDIST_AUTO_WORKERS="${PYTEST_XDIST_AUTO_NUM_WORKERS:-$(($(nproc) / 2 > 2 ? $(nproc) / 2 : 2))}"
-# Per-host worker count for the partygame CI browser-e2e pass. Declared as
+# Per-host worker count for a repo's CI browser-e2e pass. Declared as
 # e2e_workers in runners.toml and exported by apply.py (the old per-host
 # hardcode moved there); browser e2e is bound by *performance* cores, so pick
 # the value from fleet.md's "E2E worker budget". Empty = ci.yml default (1).
@@ -264,7 +264,7 @@ PYTEST_XDIST_AUTO_NUM_WORKERS=${XDIST_AUTO_WORKERS}
 ENV
 
   # Bake the host's CI slot count (from apply.py, sourced from runners.toml) so
-  # partygame's with_ci_slot.py admission gate uses the right per-host capacity.
+  # the repo's in-job admission gate uses the right per-host capacity.
   # Only when set: an empty CI_SLOTS= line would make int("") raise in that script.
   if [[ -n "${CI_SLOTS:-}" ]]; then
     echo "CI_SLOTS=${CI_SLOTS}" >>"$RUNNER_DIR/.env"

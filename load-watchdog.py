@@ -165,7 +165,7 @@ def per_core_load():
 def discover_runners():
     """Return {runner_id: runner_dir} for every configured runner on this host.
 
-    runner_id is the directory basename (e.g. "partygame-1") — the stable key
+    runner_id is the directory basename (e.g. "app-1") — the stable key
     that maps to the launchd label / systemd unit. Delegates to runner_fleet;
     every dir with a .runner file is included regardless of repo (this
     watchdog is per-host, not per-repo).
