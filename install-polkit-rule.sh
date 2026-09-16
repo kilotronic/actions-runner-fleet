@@ -118,10 +118,42 @@ if [[ -f "$DEST" ]] && diff -q <(printf '%s\n' "$rendered") "$DEST" >/dev/null 2
   exit 0
 fi
 
-command -v pkaction >/dev/null 2>&1 || command -v pkexec >/dev/null 2>&1 || {
-  echo "warning: polkit does not appear to be installed; the rule will sit unused" >&2
-  echo "         (Debian/Ubuntu: sudo apt-get install -y polkitd)" >&2
+# rules.d is created by the polkit package, so its absence means polkit is not
+# installed — and `install` will not create a missing parent, which is how this
+# first failed: `install: No such file or directory`, naming neither the path
+# nor the reason. Writing a rule nothing reads would be worse: a silent no-op
+# that looks like success, which is the same shape as the bug this whole script
+# exists to fix. So a missing polkit is refused with the command to fix it.
+#
+# POLKIT_PRESENT_CHECK overrides the probe for tests: exit 0 = present.
+_polkit_present() {
+  if [[ -n "${POLKIT_PRESENT_CHECK:-}" ]]; then
+    eval "$POLKIT_PRESENT_CHECK"
+    return $?
+  fi
+  command -v pkaction >/dev/null 2>&1 || command -v pkexec >/dev/null 2>&1 \
+    || [[ -d /usr/share/polkit-1 ]]
 }
+
+POLKIT_DIR="$(dirname "$DEST")"
+if [[ ! -d "$POLKIT_DIR" ]]; then
+  if _polkit_present; then
+    # polkit is here, just without a rules.d yet.
+    sudo install -d -m 755 -o root -g root "$POLKIT_DIR"
+    echo "created $POLKIT_DIR"
+  else
+    echo "refusing: polkit is not installed ($POLKIT_DIR does not exist)." >&2
+    echo "A rule written there would be read by nothing. Install polkit first:" >&2
+    echo "  Debian/Ubuntu:  sudo apt-get install -y polkitd" >&2
+    echo "  Fedora/RHEL:    sudo dnf install -y polkit" >&2
+    echo "  Arch:           sudo pacman -S --needed polkit" >&2
+    echo "then re-run this script." >&2
+    exit 1
+  fi
+elif ! _polkit_present; then
+  echo "warning: $POLKIT_DIR exists but no polkit binary was found;" >&2
+  echo "         the rule may sit unused until polkit is installed." >&2
+fi
 
 printf '%s\n' "$rendered" | sudo install -m 644 -o root -g root /dev/stdin "$DEST"
 echo "installed $DEST (user: $RUNNER_USER)"
