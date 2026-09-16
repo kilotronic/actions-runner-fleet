@@ -221,3 +221,43 @@ def test_uninstall_removes_an_installed_rule(tmp_path: Path, stub_sudo: str) -> 
     proc = run("--uninstall", dest=dest, PATH=stub_sudo)
     assert proc.returncode == 0
     assert not dest.exists()
+
+
+@linux_only
+def test_a_missing_rules_dir_is_created_when_polkit_is_present(
+    tmp_path: Path, stub_sudo: str
+) -> None:
+    """`install` does not create a missing parent — this failed on a real host.
+
+    The error was `install: No such file or directory`, naming neither the path
+    nor the reason.
+    """
+    dest = tmp_path / "polkit-1" / "rules.d" / "49-actions-runner-inhibit.rules"
+    assert not dest.parent.exists()
+    proc = run(
+        "--user", "ci", dest=dest, PATH=stub_sudo, POLKIT_PRESENT_CHECK="true"
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert dest.is_file()
+    assert 'subject.user == "ci"' in dest.read_text()
+
+
+@linux_only
+def test_a_missing_rules_dir_without_polkit_is_refused(
+    tmp_path: Path, stub_sudo: str
+) -> None:
+    """Writing a rule nothing reads is a silent no-op dressed as success.
+
+    That is the same shape as the bug this script exists to fix, so it refuses
+    and names the package to install instead.
+    """
+    dest = tmp_path / "polkit-1" / "rules.d" / "49-actions-runner-inhibit.rules"
+    proc = run(
+        "--user", "ci", dest=dest, PATH=stub_sudo, POLKIT_PRESENT_CHECK="false"
+    )
+    assert proc.returncode == 1
+    assert "polkit is not installed" in proc.stderr
+    assert "apt-get install -y polkitd" in proc.stderr
+    # Nothing created: a refusal that half-acts is worse than one that does not.
+    assert not dest.exists()
+    assert not dest.parent.exists()
