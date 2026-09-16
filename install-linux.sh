@@ -335,6 +335,48 @@ python3 "$SCRIPT_DIR/load-watchdog.py" --install-timer || echo "  warning: load 
 info "Installing fleet maintenance timer..."
 python3 "$SCRIPT_DIR/maintenance-timer.py" --install-timer || echo "  warning: maintenance timer install failed"
 
+# ── Sleep inhibitor (polkit) ──────────────────────────────────────────────────
+# Offered here because this is the only moment someone is reliably present, at a
+# shell, on this host, with sudo. It is not installed silently: granting a
+# logind privilege is a policy change and stays an explicit act. But leaving it
+# entirely undiscoverable is how a fleet ends up with one host holding the rule
+# by accident (left by an older kit) and another with none, and nothing anywhere
+# reporting the difference.
+#
+# Skipped quietly when the rule is already current, so re-running the installer
+# does not nag. Never prompts without a TTY — an automated install prints the
+# command instead of hanging on a read.
+if [[ -x "$SCRIPT_DIR/install-polkit-rule.sh" ]]; then
+  _polkit_rule=/etc/polkit-1/rules.d/49-actions-runner-inhibit.rules
+  # sudo -n ONLY: probing with an interactive sudo would prompt for a password
+  # just to decide whether to ask a question. If -n is denied we cannot tell
+  # whether the rule is there, and offering is the harmless direction —
+  # install-polkit-rule.sh is idempotent and reports "already current".
+  if ! sudo -n test -f "$_polkit_rule" 2>/dev/null; then
+    echo ""
+    info "Sleep inhibitor (optional)"
+    echo "  The job hooks hold a logind sleep inhibitor so this box cannot suspend"
+    echo "  mid-job. polkit grants that only inside an active login session, and the"
+    echo "  runner service is not one — so without a rule the inhibitor is refused and"
+    echo "  a suspend mid-job kills the run with no logs (it surfaces as a 404"
+    echo "  completion, which reads like a network fault)."
+    echo ""
+    echo "  The rule grants block:sleep and block:idle to $(id -un), and nothing else."
+    echo "  A machine that never suspends does not need it."
+    echo ""
+    if [[ -t 0 ]]; then
+      read -r -p "  Install it now? [y/N] " _reply || _reply=""
+      if [[ "$_reply" == [yY]* ]]; then
+        "$SCRIPT_DIR/install-polkit-rule.sh" || echo "  (see the output above; the runners are installed either way)"
+      else
+        echo "  Skipped. Install later with: ./install-polkit-rule.sh"
+      fi
+    else
+      echo "  Install with: ./install-polkit-rule.sh    (run it from this checkout)"
+    fi
+  fi
+fi
+
 echo ""
 info "Done! ${WORKERS} worker(s) installed for ${REPO}."
 echo ""
