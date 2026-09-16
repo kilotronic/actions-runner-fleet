@@ -148,8 +148,10 @@ runs outside any session — so it is refused whenever the runner user has no
 active session, as on a headless machine nobody is logged in to. On a machine
 that never suspends, the warning is harmless.
 
-Otherwise, allow the runner user to take sleep inhibitors — and nothing else —
-with a polkit rule. Run this once per host, as the runner user:
+`install-linux.sh` offers to install this at the end of a fresh install, which
+is the moment someone is actually at a shell on the host. If you skipped it then,
+or the host predates that, run it yourself — once per host, **as the runner
+user**, not under sudo (the rule names whoever runs it):
 
 ```sh
 ./install-polkit-rule.sh              # for the current user

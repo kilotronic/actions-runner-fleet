@@ -138,15 +138,58 @@ def test_convergence_may_resync_the_rule_but_never_create_it() -> None:
     assert "POLKIT_RULE=polkit/49-actions-runner-inhibit.rules\n" not in body
 
 
-def test_the_installer_is_not_called_by_any_installer() -> None:
-    """Opting in stays an explicit act — no install path may run it for you."""
-    for name in ("install.sh", "install-linux.sh", "update-host.sh"):
-        # Comments may name it — update-host.sh explains whose job creation is.
-        # An invocation is the thing to catch, so strip comment bodies first.
-        code = "\n".join(
-            ln.split("#", 1)[0] for ln in (REPO / name).read_text().splitlines()
-        )
-        assert "install-polkit-rule.sh" not in code, name
+def test_no_installer_grants_the_privilege_without_being_asked() -> None:
+    """Opting in stays an explicit act, but not an undiscoverable one.
+
+    install-linux.sh OFFERS the rule at the end of a fresh install — that is the
+    only moment someone is reliably present, at a shell, on the host, with sudo.
+    Leaving it undiscoverable is how a fleet ends up with one host holding the
+    rule by accident and another with none.
+
+    What must not happen is an unconditional call: the invocation has to sit
+    behind a yes. update-host.sh must not call it at all — convergence re-syncs
+    an installed rule and never creates one.
+    """
+    # Convergence never installs it.
+    code = "\n".join(
+        ln.split("#", 1)[0] for ln in (REPO / "update-host.sh").read_text().splitlines()
+    )
+    assert "install-polkit-rule.sh" not in code
+
+    # macOS has no polkit; its installer must not mention it either.
+    mac = "\n".join(
+        ln.split("#", 1)[0] for ln in (REPO / "install.sh").read_text().splitlines()
+    )
+    assert "install-polkit-rule.sh" not in mac
+
+    # The Linux installer offers it, gated on an affirmative reply.
+    linux = (REPO / "install-linux.sh").read_text()
+    assert "install-polkit-rule.sh" in linux
+    offer = linux[linux.index("Sleep inhibitor (optional)") :]
+    invocation = offer.index('"$SCRIPT_DIR/install-polkit-rule.sh"')
+    guard = offer.index('_reply" == [yY]')
+    assert guard < invocation, "the call must sit inside the yes branch"
+
+
+def test_the_install_offer_never_prompts_without_a_tty() -> None:
+    """An automated install must print the command, not block on a read."""
+    linux = (REPO / "install-linux.sh").read_text()
+    offer = linux[linux.index("Sleep inhibitor (optional)") :]
+    assert "[[ -t 0 ]]" in offer
+    assert offer.index("[[ -t 0 ]]") < offer.index("read -r -p")
+
+
+def test_the_install_offer_probes_without_prompting_for_a_password() -> None:
+    """Deciding whether to ASK must not itself prompt for sudo.
+
+    The probe is `sudo -n`; an interactive one would demand a password just to
+    decide whether to put a question on screen.
+    """
+    linux = (REPO / "install-linux.sh").read_text()
+    offer = linux[linux.index("_polkit_rule=") :]
+    probe = offer[: offer.index("then")]
+    assert "sudo -n test -f" in probe
+    assert "sudo test -f" not in probe.replace("sudo -n test -f", "")
 
 
 # ── The mutating path ────────────────────────────────────────────────────────
