@@ -75,11 +75,12 @@ before it plays.
 | `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off   |
 | `hooks/ensure-orbstack.sh`        | Four-state OrbStack recovery (healthy / down / slow / wedged)                 |
 | `install.sh` / `install-linux.sh` | Register runners, install load / lid / maintenance timers                     |
-| `status.sh`                       | Report runners, container runtime and CI Postgres for one repo                |
+| `status.sh`                       | Report runners, container runtime and (if present) a CI database container    |
 | `runner-status.30s.py`            | SwiftBar menu bar plugin showing live fleet status (macOS)                    |
 | `install-menubar.sh`              | Install the SwiftBar plugin above                                             |
 | `exclude-ci-paths.sh`             | Keep Spotlight / Time Machine / Photos off the CI work trees (macOS)          |
 | `reclaim-ci-disk.sh`              | Thin Time Machine local snapshots when a CI host runs low on disk (macOS)     |
+| `prune.sh`                        | Reclaim runner disk: stale `_diag` logs and idle `_work/_temp` (dry-run by default) |
 
 OrbStack ensure is a **host** concern: the job-started hook runs before GitHub
 sets up `jobs.<name>.container`, and the watchdog runs when no job is queued.
