@@ -79,8 +79,8 @@ before it plays.
 | `runner-status.30s.py`            | SwiftBar menu bar plugin showing live fleet status (macOS)                    |
 | `install-menubar.sh`              | Install the SwiftBar plugin above                                             |
 | `install-polkit-rule.sh`          | Opt-in: let the runner user hold logind sleep inhibitors (Linux)             |
-| `exclude-ci-paths.sh`             | Keep Spotlight / Time Machine / Photos off the CI work trees (macOS)          |
-| `exclude-spotlight.sh`            | Add a path to Spotlight's Privacy list — the one exclusion that works (macOS) |
+| `exclude-ci-paths.sh`             | Keep Time Machine / Backblaze / Photos off the CI work trees; report the rest (macOS) |
+| `exclude-spotlight.sh`            | Report what Spotlight still indexes under the CI trees; the exclusion itself is GUI-only (macOS) |
 | `reclaim-ci-disk.sh`              | Thin Time Machine local snapshots when a CI host runs low on disk (macOS)     |
 | `prune.sh`                        | Reclaim runner disk: stale `_diag` logs and idle `_work/_temp` (dry-run by default) |
 
