@@ -53,16 +53,26 @@
 #                             control. The marker is honored at VOLUME/MOUNT
 #                             roots only. OrbStack gets away with it because
 #                             ~/OrbStack is an NFS mount root (`mount` shows
-#                             `OrbStack:/OrbStack on /Users/jason/OrbStack`),
+#                             `OrbStack:/OrbStack on /Users/<user>/OrbStack`),
 #                             not because the file works on directories.
 #   `mdutil -i off <dir>`     mdutil operates on volumes/stores, not paths.
-#   Privacy list              The supported mechanism, and the one that works.
-#                             It lives in a root-owned VolumeConfiguration.plist
-#                             and these hosts have no passwordless sudo, so
-#                             neither this script nor the maintenance timer can
-#                             write it — but a human at a shell can, which is
-#                             what ./exclude-spotlight.sh is for. This script
-#                             reports the path and points there.
+#   Privacy list              The supported mechanism, and the one that works —
+#                             but ONLY from the GUI (System Settings > Spotlight
+#                             > Search Privacy). It is backed by a root-owned
+#                             VolumeConfiguration.plist that mds owns outright:
+#                             writing Exclusions into it with plutil reports
+#                             success and changes nothing mds acts on — it does
+#                             not re-read the file — and the only live reload
+#                             (launchctl kickstart of mds) is refused while SIP
+#                             is on. Measured 2026-09-17 on an 8 GiB Mac mini:
+#                             the write "succeeded" and the index kept climbing
+#                             to 73360; the GUI then took it to 0 in seconds.
+#                             So no script can do this, and neither can a human
+#                             over SSH — it takes the console (or Screen
+#                             Sharing). ./exclude-spotlight.sh reports what is
+#                             still indexed, verifies against a live control,
+#                             and opens the pane (--open); the Search Privacy
+#                             button is still a click away.
 #
 # Beware of verifying this with the wrong query: `mdfind -onlyin <p>
 # 'kMDItemFSName == "*"'` returns 0 for EVERY path, indexed or not, which reads
@@ -147,11 +157,16 @@ done
 # Time Machine half looked like success.
 _manual=()
 
-# Spotlight cannot be excluded per-directory without root (see header). Only
-# report paths Spotlight demonstrably still has indexed, so this line goes away
-# on a host where it has actually been done.
+# Spotlight cannot be excluded per-directory by ANY script (see header) — only
+# in the GUI. Only report paths Spotlight demonstrably still has indexed, so
+# this line goes away on a host where it has actually been done.
 if _spotlight_indexed "$BASE_DIR"; then
-  _manual+=("Spotlight: ./exclude-spotlight.sh   (adds $BASE_DIR to the Privacy list; needs sudo)")
+  # ONE entry: the renderer prints "      - $m" per element, so a second element
+  # would come out as its own malformed bullet. The embedded newline is indented
+  # to sit under this one's text instead.
+  _manual+=("Spotlight: System Settings > Spotlight > Search Privacy... -> add $BASE_DIR
+          (needs the console; ./exclude-spotlight.sh --open opens the pane,
+          then re-run it to verify against a live control)")
 fi
 
 # Backblaze's exclusion rules live in a root-owned XML that the app rewrites on
