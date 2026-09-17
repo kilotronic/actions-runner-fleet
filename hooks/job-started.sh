@@ -18,6 +18,15 @@ RT="${CONTAINER_RUNTIME:-}"
 
 # Sampled BEFORE ensure-orbstack.sh below: the snapshot is meant to describe the
 # state the job arrived into, not the state after this hook has perturbed it.
+# ── This job's temp dir ──────────────────────────────────────────────────────
+#
+# apply.py points each runner's TMPDIR at its own `_tmp` (see
+# runner_env_updates) and job-completed.sh empties it after the job. Create it
+# here because that wipe, a fresh install, or a pruned disk can all leave the
+# path missing, and a TMPDIR that does not exist breaks tools in ways that read
+# as anything but a missing directory. Best-effort: never fail a job over it.
+[[ -n "${TMPDIR:-}" ]] && mkdir -p "$TMPDIR" 2>/dev/null
+
 # shellcheck source=hooks/_sidecars.sh
 [[ -r "$HOOKS/_sidecars.sh" ]] && . "$HOOKS/_sidecars.sh" && run_sidecars started
 

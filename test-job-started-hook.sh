@@ -91,7 +91,8 @@ EOS
   # the grant scenario — which is how this test failed the first time it ran.
   # bash and env are themselves PATH-resolved: the hook is run via `bash` and
   # the stubs carry `#!/usr/bin/env bash` shebangs.
-  for tool in bash env dirname sleep tail; do
+  # mkdir/find: the job-temp create and wipe (see the job-tmp scenarios).
+  for tool in bash env dirname sleep tail mkdir find; do
     ln -sf "$(command -v "$tool")" "$sb/bin/$tool"
   done
 
@@ -287,6 +288,70 @@ _run "$SB"
 _assert sidecar-absent "[[ \$(cat $SB/rc) == 0 ]]" "exits 0 with no sidecars installed"
 _assert sidecar-absent "! [[ -s $SB/err ]]" "silent — absence is not an error"
 _assert sidecar-absent "grep -q -- '--full' $SB/state/orb-calls" "later work still runs"
+
+# ── Job temp dir ─────────────────────────────────────────────────────────────
+#
+# apply.py points each runner's TMPDIR at its own _tmp on disk; these two hooks
+# are the other half — job-started creates it, job-completed empties it. Without
+# the create, a wiped or freshly-installed runner hands its job a TMPDIR that
+# does not exist. Without the wipe, temp accumulates until the filesystem fills,
+# which is the failure this whole mechanism exists to prevent.
+#
+# The guard assertions are the important ones. `rm -rf "$TMPDIR"/*` with an
+# unset, empty, or surprising TMPDIR is how a cleanup hook deletes a home
+# directory, and this one runs after every job on the host.
+
+# 12. job-started creates the dir its job will use.
+SB=$(_sandbox grant none)
+mkdir -p "$SB/actions-runner/app-1"
+TMPDIR="$SB/actions-runner/app-1/_tmp" _run "$SB"
+_assert job-tmp "[[ -d $SB/actions-runner/app-1/_tmp ]]" "job-started creates TMPDIR"
+_assert job-tmp "[[ \$(cat $SB/rc) == 0 ]]" "exits 0"
+
+# 13. job-completed empties it, but leaves the dir itself in place.
+SB=$(_sandbox grant none)
+mkdir -p "$SB/actions-runner/app-1/_tmp/leftover"
+touch "$SB/actions-runner/app-1/_tmp/cache.bin"
+TMPDIR="$SB/actions-runner/app-1/_tmp" _run_completed "$SB"
+_assert job-tmp "[[ -d $SB/actions-runner/app-1/_tmp ]]" "job-completed keeps the dir"
+_assert job-tmp "! [[ -e $SB/actions-runner/app-1/_tmp/cache.bin ]]" "removes leftover files"
+_assert job-tmp "! [[ -e $SB/actions-runner/app-1/_tmp/leftover ]]" "removes leftover dirs"
+
+# 14. A TMPDIR outside the runner base is NOT wiped — the guard that keeps this
+#     hook from deleting something that merely happens to be the ambient TMPDIR.
+SB=$(_sandbox grant none)
+mkdir -p "$SB/elsewhere"
+touch "$SB/elsewhere/precious"
+TMPDIR="$SB/elsewhere" _run_completed "$SB"
+_assert job-tmp-guard "[[ -e $SB/elsewhere/precious ]]" "refuses a path outside the runner base"
+_assert job-tmp-guard "[[ \$(cat $SB/rc) == 0 ]]" "still exits 0"
+
+# 15. An unset TMPDIR wipes nothing and is not an error.
+SB=$(_sandbox grant none)
+mkdir -p "$SB/actions-runner/app-1/_tmp"
+touch "$SB/actions-runner/app-1/_tmp/keep"
+_run_completed "$SB"
+_assert job-tmp-guard "[[ -e $SB/actions-runner/app-1/_tmp/keep ]]" "unset TMPDIR wipes nothing"
+_assert job-tmp-guard "[[ \$(cat $SB/rc) == 0 ]]" "exits 0 with TMPDIR unset"
+
+# 16. /tmp itself is never the wipe target, even if it is somehow TMPDIR.
+#
+#     `find` is STUBBED here rather than real, and that is not fastidiousness:
+#     an earlier version of this scenario pointed TMPDIR at the real /tmp and
+#     asserted on the side effect. That is only safe while the guard works —
+#     the first time someone breaks it, the test itself deletes the developer's
+#     /tmp. (It did exactly that, once.) Asserting that `find` was never
+#     INVOKED tests the guard directly and cannot damage the host.
+SB=$(_sandbox grant none)
+cat >"$SB/bin/find" <<EOS
+#!/usr/bin/env bash
+echo "\$*" >> "$SB/state/find-calls"
+EOS
+chmod +x "$SB/bin/find"
+: >"$SB/state/find-calls"
+TMPDIR=/tmp _run_completed "$SB"
+_assert job-tmp-guard "! [[ -s $SB/state/find-calls ]]" "refuses /tmp outright — no delete even attempted"
+_assert job-tmp-guard "[[ \$(cat $SB/rc) == 0 ]]" "exits 0"
 
 if [[ $FAILURES -gt 0 ]]; then
   echo "$FAILURES assertion(s) failed"

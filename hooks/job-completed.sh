@@ -17,6 +17,25 @@ HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=hooks/_sidecars.sh
 [[ -r "$HOOKS/_sidecars.sh" ]] && . "$HOOKS/_sidecars.sh" && run_sidecars completed
 
+# ── Empty this job's temp dir ────────────────────────────────────────────────
+#
+# The counterpart to job-started.sh's mkdir. Emptying it between jobs is what
+# stops temp from accumulating on a host: a leaked cache dir per run is
+# invisible until the filesystem is full, and then the box fails jobs in ways
+# that never mention temp at all.
+#
+# The case guard is load-bearing, not defensive dressing. This hook runs after
+# every job on the host, and `rm -rf` over an unset, empty, or ambient TMPDIR is
+# exactly how a cleanup hook eats a home directory. Wipe ONLY a path that is a
+# runner's own `_tmp` under this user's runner base; anything else — including a
+# bare /tmp — is left alone. `find -delete` rather than a glob so hidden entries
+# go too and the dir itself stays.
+case "${TMPDIR:-}" in
+  "$HOME"/actions-runner/*/_tmp)
+    [[ -d "$TMPDIR" ]] && find "$TMPDIR" -mindepth 1 -delete 2>/dev/null
+    ;;
+esac
+
 # ── Fleet update ─────────────────────────────────────────────────────────────
 #
 # Ask the service manager to start the maintenance job instead of running
