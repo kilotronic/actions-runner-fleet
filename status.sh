@@ -166,22 +166,26 @@ echo ""
 
 echo "Host health:"
 
-# Disk. A full host fails jobs without mentioning disk: apt cannot write its
-# InRelease splits, so `playwright install --with-deps` dies behind a wall of
-# GPG signature errors. Convergence prunes under pressure; this makes the
-# pressure visible before it gets there.
+# Disk and temp. A full host fails jobs without mentioning space at all — see
+# _fs_health.sh for the two shapes that cost runs here. Convergence prunes the
+# volume under pressure; this makes the pressure visible before it gets there.
+# shellcheck source=_fs_health.sh
+. "$SCRIPT_DIR/_fs_health.sh"
 if [[ "$OS" == "Darwin" ]]; then
   _vol="${CI_DISK_VOLUME:-/System/Volumes/Data}" # `/` is the read-only system volume
 else
   _vol="${CI_DISK_VOLUME:-/}"
 fi
-_avail="$(df -Pk "$_vol" | awk 'NR==2 {printf "%d", $4/1048576}')"
-_used="$(df -Pk "$_vol" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
-if ((_avail < ${CI_DISK_MIN_FREE_GIB:-40})) && ((_used > ${CI_DISK_MAX_USED_PCT:-85})); then
-  echo "  disk: LOW — ${_avail}GiB free, ${_used}% used on $_vol (convergence will prune)"
-else
-  echo "  disk: ${_avail}GiB free, ${_used}% used on $_vol"
-fi
+fs_report disk "$_vol" "${CI_DISK_MIN_FREE_GIB:-40}" "${CI_DISK_MAX_USED_PCT:-85}" \
+  "convergence will prune"
+
+# Temp gets its own line because it is usually a different, much smaller
+# filesystem than the volume — commonly a tmpfs sized to a fraction of RAM — so
+# a healthy `disk:` line says nothing about it. Jobs are pointed at a per-runner
+# TMPDIR (see apply.py's runner_env_updates), but everything else on the box
+# still shares this one, and when it fills the failures land on CI.
+_tmp="${CI_TMP_PATH:-${TMPDIR:-/tmp}}"
+fs_report tmp "$_tmp" "${CI_TMP_MIN_FREE_GIB:-1}" "${CI_TMP_MAX_USED_PCT:-85}"
 
 # Service-file drift. The installers skip an already-configured runner, so a
 # unit or plist from an older kit is never rewritten by them; apply.py converges

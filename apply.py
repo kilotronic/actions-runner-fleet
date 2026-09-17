@@ -85,6 +85,33 @@ def upsert_env(text: str, updates: dict) -> str | None:
     return "\n".join(lines) + "\n"
 
 
+
+def runner_env_updates(
+    dirname: str, ci_slots: int, e2e_workers: int | None, gated: bool
+) -> dict:
+    """The .env keys apply.py converges into one runner. Pure.
+
+    TMPDIR is converged for EVERY repo, not only the gated one: every job
+    writes temp, and a host whose /tmp is a tmpfs has it exhausted by whatever
+    leaks there. The failures that follow do not mention temp — a package
+    manager cannot write its signature splits and dies behind a wall of GPG
+    errors, a browser install reports success with nothing runnable in it, a
+    browser dies mid-test — so this is cheap insurance against an expensive
+    misdiagnosis. A dir on the runner's own disk also keeps job temp off a
+    RAM-backed tmpfs, where it competes with the jobs for memory.
+
+    Per runner, not one shared dir: two runners on a host can hold jobs at the
+    same time, and the job-completed hook that empties this one must not be
+    able to delete another job's in-flight temp.
+    """
+    updates: dict[str, str | None] = {"TMPDIR": str(RUNNER_BASE / dirname / "_tmp")}
+    if gated:
+        updates["CI_SLOTS"] = str(ci_slots)
+        updates["E2E_WORKERS_OVERRIDE"] = (
+            str(e2e_workers) if e2e_workers is not None else None
+        )
+    return updates
+
 # ── Pure convergence core (no I/O — unit-tested in test_apply.py) ─────────────
 
 Plan = namedtuple(
@@ -1103,27 +1130,27 @@ def main() -> int:
             D, local_dirs, gh, host=host, busy_dirs=busy_dirs, allow_remove=allow_remove
         )
 
-        # .env convergence for the gated repo: tuning ci_slots/e2e_workers in
-        # runners.toml must reach EXISTING runners, not only new installs. The
-        # runner process reads .env at startup, so a change needs a restart —
-        # busy runners are deferred untouched (drift persists → next tick
-        # retries). Dirs already leaving (remove/cleanup) are skipped.
+        # .env convergence: tuning runners.toml must reach EXISTING runners, not
+        # only new installs. The runner process reads .env at startup, so a
+        # change needs a restart — busy runners are deferred untouched (drift
+        # persists → next tick retries). Dirs already leaving are skipped.
+        #
+        # This runs for EVERY repo, not just the gated one. It was gated when
+        # the only keys were the gated repo's budget (ci_slots/e2e_workers);
+        # TMPDIR applies to every runner, so the loop had to come out of that
+        # branch. runner_env_updates decides which keys a given repo gets.
         env_work = []  # (dirname, new_text)
-        if repo_name in gated:
-            updates = {
-                "CI_SLOTS": str(ci_slots),
-                "E2E_WORKERS_OVERRIDE": (
-                    str(e2e_workers) if e2e_workers is not None else None
-                ),
-            }
-            leaving = set(plan.to_remove) | set(plan.to_cleanup)
-            for dn in sorted(set(local_dirs) - leaving, key=_dir_index):
-                env_path = RUNNER_BASE / dn / ".env"
-                if not env_path.is_file():
-                    continue
-                new_text = upsert_env(env_path.read_text(), updates)
-                if new_text is not None:
-                    env_work.append((dn, new_text))
+        leaving = set(plan.to_remove) | set(plan.to_cleanup)
+        for dn in sorted(set(local_dirs) - leaving, key=_dir_index):
+            env_path = RUNNER_BASE / dn / ".env"
+            if not env_path.is_file():
+                continue
+            new_text = upsert_env(
+                env_path.read_text(),
+                runner_env_updates(dn, ci_slots, e2e_workers, repo_name in gated),
+            )
+            if new_text is not None:
+                env_work.append((dn, new_text))
 
         # Service files converge for EVERY repo, not just the gated one: a unit
         # or plist written by an older kit is never rewritten by the installers,

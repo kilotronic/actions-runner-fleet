@@ -511,6 +511,38 @@ class UpsertEnvTest(unittest.TestCase):
         self.assertEqual(out, "MY_CI_SLOTS=9\nCI_SLOTS=2\n")
 
 
+class RunnerEnvUpdatesTest(unittest.TestCase):
+    """What apply.py converges into each runner's .env.
+
+    TMPDIR is the reason this is not gated: every repo's jobs write temp, and
+    a shared /tmp that is a tmpfs gets exhausted by whatever leaks into it.
+    """
+
+    def test_tmpdir_is_converged_for_a_non_gated_repo(self):
+        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=None, gated=False)
+        self.assertEqual(updates["TMPDIR"], str(apply.RUNNER_BASE / "app-1" / "_tmp"))
+
+    def test_a_non_gated_repo_does_not_get_the_gated_budget_keys(self):
+        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=3, gated=False)
+        self.assertNotIn("CI_SLOTS", updates)
+        self.assertNotIn("E2E_WORKERS_OVERRIDE", updates)
+
+    def test_tmpdir_is_per_runner_so_one_job_cannot_wipe_another(self):
+        a = apply.runner_env_updates("app-1", ci_slots=1, e2e_workers=None, gated=True)
+        b = apply.runner_env_updates("app-2", ci_slots=1, e2e_workers=None, gated=True)
+        self.assertNotEqual(a["TMPDIR"], b["TMPDIR"])
+
+    def test_a_gated_repo_keeps_its_budget_keys_alongside_tmpdir(self):
+        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=3, gated=True)
+        self.assertEqual(updates["CI_SLOTS"], "2")
+        self.assertEqual(updates["E2E_WORKERS_OVERRIDE"], "3")
+        self.assertIn("TMPDIR", updates)
+
+    def test_unset_e2e_workers_stays_unmanaged(self):
+        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=None, gated=True)
+        self.assertIsNone(updates["E2E_WORKERS_OVERRIDE"])
+
+
 class InstallRunnersEnvTest(unittest.TestCase):
     def _call_env(self, e2e_workers, work_root=None):
         with mock.patch.object(apply.subprocess, "call", return_value=0) as call:
