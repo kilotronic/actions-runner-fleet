@@ -223,7 +223,7 @@ class RemoveRunnerTest(unittest.TestCase):
 class ReregisterTest(unittest.TestCase):
     """reregister's fail-safe ordering: mint the token BEFORE touching local state,
     so a token failure never strips a dir it then can't re-register (the bug that
-    left host-a's dotfiles-jl runners bare). And it must clear `.runner_migrated`,
+    left host-a's notes runners bare). And it must clear `.runner_migrated`,
     else config.sh --replace refuses with "already configured".
     """
 
@@ -243,7 +243,7 @@ class ReregisterTest(unittest.TestCase):
                 ".credentials_rsaparams",
                 ".runner_migrated",
             )
-            d = self._make_dir(tmpdir, "dotfiles-jl-1", files)
+            d = self._make_dir(tmpdir, "notes-1", files)
             with (
                 mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
                 mock.patch.object(apply, "mint_token", return_value=None),
@@ -251,7 +251,7 @@ class ReregisterTest(unittest.TestCase):
                 mock.patch.object(apply, "_svc_restart") as svc_restart,
             ):
                 with contextlib.redirect_stdout(io.StringIO()):
-                    result = apply.reregister("owner/repo", "dotfiles-jl-1", "host-a")
+                    result = apply.reregister("owner/repo", "notes-1", "host-a")
 
             self.assertFalse(result)
             run_cmd.assert_not_called()  # never touched config.sh
@@ -261,7 +261,7 @@ class ReregisterTest(unittest.TestCase):
 
     def test_reregister_clears_migrated_marker_and_configures(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            d = self._make_dir(tmpdir, "dotfiles-jl-1", (".runner", ".runner_migrated"))
+            d = self._make_dir(tmpdir, "notes-1", (".runner", ".runner_migrated"))
             with (
                 mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
                 mock.patch.object(apply, "mint_token", return_value="tok"),
@@ -271,7 +271,7 @@ class ReregisterTest(unittest.TestCase):
                 ) as svc_restart,
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                result = apply.reregister("owner/repo", "dotfiles-jl-1", "host-a")
+                result = apply.reregister("owner/repo", "notes-1", "host-a")
 
             self.assertTrue(result)
             self.assertFalse((d / ".runner_migrated").exists())  # cleared
@@ -391,18 +391,18 @@ class DiscoverInstalledDirsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)
             # bare: config.sh, no .runner → found
-            (base / "dotfiles-jl-1").mkdir()
-            (base / "dotfiles-jl-1" / "config.sh").touch()
+            (base / "notes-1").mkdir()
+            (base / "notes-1" / "config.sh").touch()
             # registered: config.sh + .runner → discover_live's job, not found here
-            (base / "dotfiles-jl-2").mkdir()
-            (base / "dotfiles-jl-2" / "config.sh").touch()
-            (base / "dotfiles-jl-2" / ".runner").touch()
-            # different repo (digit anchor keeps -public out of "dotfiles-jl")
-            (base / "dotfiles-jl-public-1").mkdir()
-            (base / "dotfiles-jl-public-1" / "config.sh").touch()
+            (base / "notes-2").mkdir()
+            (base / "notes-2" / "config.sh").touch()
+            (base / "notes-2" / ".runner").touch()
+            # different repo (digit anchor keeps -public out of "notes")
+            (base / "notes-public-1").mkdir()
+            (base / "notes-public-1" / "config.sh").touch()
             with mock.patch.object(apply, "RUNNER_BASE", base):
                 self.assertEqual(
-                    apply.discover_installed_dirs("dotfiles-jl"), ["dotfiles-jl-1"]
+                    apply.discover_installed_dirs("notes"), ["notes-1"]
                 )
 
 
@@ -995,11 +995,11 @@ class HealthStateTest(unittest.TestCase):
         treat every parked runner on a closed laptop as a hung listener."""
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "lid-watchdog.state").write_text(
-                '{"paused": ["app-1", "dotfiles-jl-1"]}'
+                '{"paused": ["app-1", "notes-1"]}'
             )
             with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
                 self.assertEqual(
-                    apply.load_watchdog_paused(), {"app-1", "dotfiles-jl-1"}
+                    apply.load_watchdog_paused(), {"app-1", "notes-1"}
                 )
 
     def test_both_watchdog_state_files_are_unioned(self):
@@ -1061,7 +1061,7 @@ class ReregisterLabelsTest(unittest.TestCase):
 
     def _argv(self, extra_labels):
         with tempfile.TemporaryDirectory() as tmpdir:
-            d = Path(tmpdir) / "dotfiles-jl-1"
+            d = Path(tmpdir) / "notes-1"
             d.mkdir()
             (d / "config.sh").touch()
             with (
@@ -1072,7 +1072,7 @@ class ReregisterLabelsTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 apply.reregister(
-                    "owner/repo", "dotfiles-jl-1", "host-a", extra_labels=extra_labels
+                    "owner/repo", "notes-1", "host-a", extra_labels=extra_labels
                 )
             return run_cmd.call_args[0][0]
 
