@@ -74,3 +74,38 @@ class TestFsReport:
             tmp_path, "disk /x 40 85 'convergence will prune'", avail_kb=0, used_pct=99
         )
         assert "convergence will prune" in out
+
+
+class TestInstallersBakeTmpdir:
+    """A freshly installed runner must get TMPDIR too, not only converged ones.
+
+    apply.py converges TMPDIR into existing runners, but that loop reads the
+    dirs that existed BEFORE the install, so a runner installed this pass would
+    otherwise run its first jobs against the shared /tmp and only pick up its
+    own dir on the next convergence tick — exactly the window the fix exists to
+    close. The installers therefore write the line themselves, derived from the
+    runner dir so it cannot drift from what apply.py computes.
+    """
+
+    INSTALLERS = ["install-linux.sh", "install.sh"]
+
+    @pytest.mark.parametrize("installer", INSTALLERS)
+    def test_installer_writes_a_tmpdir_line(self, installer):
+        text = (REPO / installer).read_text()
+        assert "TMPDIR=" in text, f"{installer} never writes TMPDIR into .env"
+
+    @pytest.mark.parametrize("installer", INSTALLERS)
+    def test_installer_derives_tmpdir_from_the_runner_dir(self, installer):
+        # Must be the runner's own _tmp, matching apply.py's runner_env_updates.
+        text = (REPO / installer).read_text()
+        assert 'TMPDIR=$RUNNER_DIR/_tmp' in text or 'TMPDIR=${RUNNER_DIR}/_tmp' in text
+
+    def test_apply_and_installer_agree_on_the_path_shape(self):
+        """apply.py's computed path must end in the same <dir>/_tmp the installers write."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("apply_mod", REPO / "apply.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        got = mod.runner_env_updates("app-1", ci_slots=1, e2e_workers=None, gated=False)
+        assert got["TMPDIR"].endswith("/app-1/_tmp")

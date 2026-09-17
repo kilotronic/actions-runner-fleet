@@ -247,6 +247,15 @@ ENV
     echo "E2E_WORKERS_OVERRIDE=${E2E_WORKERS_OVERRIDE}" >>"$RUNNER_DIR/.env"
   fi
 
+  # Point this runner's jobs at their own temp dir, on the runner's own disk.
+  # Derived from RUNNER_DIR so it cannot drift from apply.py's
+  # runner_env_updates, which converges the same path into existing runners.
+  # Written here as well because that convergence loop reads the dirs that
+  # existed BEFORE this install, so a runner added this pass would otherwise
+  # spend its first jobs on the shared /tmp — the very thing being avoided.
+  echo "TMPDIR=$RUNNER_DIR/_tmp" >>"$RUNNER_DIR/.env"
+  mkdir -p "$RUNNER_DIR/_tmp"
+
   # When _work is offloaded (above), tell the job-started mount-guard which path
   # must be mounted & writable before a job runs. WORK_DIR is set in the offload
   # block; this reaches the hook because the runner exports its .env to jobs.
