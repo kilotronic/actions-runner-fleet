@@ -4,6 +4,10 @@
 __pycache__/
 *.pyc
 .venv/
+# Local artifact: running `uv`/`uvx` in this repo writes one, but nothing here
+# consumes it — CI builds its venv with `python3 -m venv` + pip and pins ruff
+# itself. Committing it would just be churn from whoever last ran uv.
+uv.lock
 .pytest_cache/
 .ruff_cache/
 .serena/
