@@ -173,6 +173,13 @@ a wake acts at once. What it cannot do:
   tick that reads battery, so it runs from the wake, not from the unplug.
 - **Rescue a job already running** when either condition begins.
 
+The first gap closes only if a sleeping laptop stops long-polling. Turning off
+Power Nap on battery does that; the installer leaves the setting alone:
+
+```sh
+sudo pmset -b powernap 0   # check with: pmset -g custom
+```
+
 ## Sleep inhibitors (Linux)
 
 On Linux the job hooks hold a logind sleep inhibitor while a job runs, and for 15
