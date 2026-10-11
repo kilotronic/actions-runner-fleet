@@ -68,7 +68,7 @@ before it plays.
 | --------------------------------- | ----------------------------------------------------------------------------- |
 | `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove), then restart hung listeners |
 | `load-watchdog.py`                | Pause idle listeners when per-core load is high; resume when it drops         |
-| `lid-watchdog.py`                 | Pause idle listeners on a laptop whose lid is closed (macOS; no-op elsewhere) |
+| `lid-watchdog.py`                 | Pause idle listeners on a laptop whose lid is closed, or that has been on battery for 30 min (macOS; no-op elsewhere) |
 | `maintenance-timer.py`            | Every 2h and after each job: `update-host.sh`, so hosts self-heal             |
 | `runner_timers.py`                | Shared launchd / systemd `--user` installer                                   |
 | `orbstack-watchdog.py`            | Installed only when `container_runtime = "orbstack"`                          |
@@ -131,6 +131,47 @@ When the last runner on a host is removed, the uninstaller also removes the
 host's timers and the kit's files under `~/actions-runner` — hooks, caches and
 state. Logs are kept, and the inventory in `~/.config/actions-runner` (including
 any job sounds) is never touched.
+
+## Laptops: lid and battery (macOS)
+
+A laptop runner keeps receiving jobs when it should not. With the lid closed,
+Power Nap keeps the listener's long-poll alive, so GitHub still assigns it
+work. Unplugged, it can sleep mid-job: the job hooks' `caffeinate -s` holds
+system sleep off only on AC power. Either way the job ends `cancelled` or
+`failure`, with a step that never finished.
+
+`lid-watchdog.py` stops a laptop's **idle** listeners, so they go offline and
+GitHub routes work elsewhere, when either
+
+- the lid is closed, or
+- the host has been on battery for more than 30 minutes
+  (`BATTERY_GRACE_SECONDS`), as `pmset -g batt` reports it.
+
+It brings them back once neither holds — lid open, on AC power — except any
+the load watchdog still has offline. The load watchdog, in turn, leaves its
+own paused runners offline while either condition holds. A job that is
+already running is never interrupted. Desktops and minis (no lid, no internal
+battery) and Linux hosts are untouched.
+
+```sh
+./lid-watchdog.py --status          # lid, power, battery clock, and what a tick would do
+./lid-watchdog.py --tick --dry-run  # evaluate once, change nothing
+```
+
+Opt out per host with `touch ~/actions-runner/.no-power-watchdog` (the
+battery condition only), or `touch ~/actions-runner/.no-lid-watchdog` (the
+whole watchdog, battery condition included).
+
+The battery clock is wall time, saved in `~/actions-runner/lid-watchdog.state`.
+The watchdog runs every 15s on a launchd timer, which cannot fire while the Mac
+sleeps; time asleep still counts toward the 30 minutes, so the first tick after
+a wake acts at once. What it cannot do:
+
+- **Act before that first tick.** A listener still online when the Mac went to
+  sleep can take a job on a Power Nap wake before the watchdog runs.
+- **See an unplug that happened during sleep.** The clock starts at the first
+  tick that reads battery, so it runs from the wake, not from the unplug.
+- **Rescue a job already running** when either condition begins.
 
 ## Sleep inhibitors (Linux)
 
