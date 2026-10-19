@@ -79,7 +79,7 @@ def decide(
     low=LOW,
     high=HIGH,
     debounce=DEBOUNCE,
-    lid_closed=False,
+    held_offline=False,
 ):
     """Decide what to pause/resume this tick. Pure: same inputs → same Plan.
 
@@ -87,8 +87,9 @@ def decide(
     high_ticks  consecutive prior ticks above `high` (from persisted state)
     paused      runner ids this watchdog has already paused
     idle        runner ids currently idle (running a service, not mid-job)
-    lid_closed  True when this host is a laptop with the lid shut — never
-                resume, or this watchdog undoes the lid watchdog
+    held_offline  True when the lid watchdog wants this host offline (lid
+                  shut, or on battery past its grace) — never resume, or
+                  this watchdog undoes the lid watchdog
 
     Returns a Plan of runner ids to pause and resume plus the new high_ticks.
     Only runners this watchdog paused are ever resumed; only idle runners are
@@ -98,8 +99,8 @@ def decide(
 
     if load < low:
         # Comfortable again: bring back everything we paused — unless the
-        # lid is closed, in which case stay offline.
-        if lid_closed:
+        # lid watchdog is holding the host offline.
+        if held_offline:
             return Plan(to_pause=[], to_resume=[], high_ticks=0)
         return Plan(to_pause=[], to_resume=sorted(paused), high_ticks=0)
 
@@ -138,22 +139,34 @@ def save_state(high_ticks, paused):
 # ── Runner discovery & idle detection (shared via runner_fleet) ───────────────
 
 
-def _lid_closed():
-    """True iff this host is a laptop with the lid shut. False otherwise.
+_lidwd = None
 
-    Lazy-imports the lid watchdog's parser so the two modules do not import
-    each other at load time. A missing or unreadable ioreg is False (fail
-    open: this watchdog keeps doing load shedding).
+
+def _lid_watchdog():
+    """Load lid-watchdog.py for its hold check. Lazy so the two modules do not
+    import each other at load time."""
+    global _lidwd
+    if _lidwd is None:
+        spec = importlib.util.spec_from_file_location(
+            "lidwd", Path(__file__).resolve().with_name("lid-watchdog.py")
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _lidwd = mod
+    return _lidwd
+
+
+def _lid_watchdog_holds():
+    """True iff the lid watchdog wants this host offline right now: the lid is
+    shut, or the host has been on battery past its grace. False otherwise.
+
+    A missing or unreadable lid watchdog is False (fail open: this watchdog
+    keeps doing load shedding).
     """
     if not IS_MAC:
         return False
     try:
-        spec = importlib.util.spec_from_file_location(
-            "lidwd", Path(__file__).resolve().with_name("lid-watchdog.py")
-        )
-        lidwd = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(lidwd)
-        return lidwd.read_clamshell() is True
+        return _lid_watchdog().holds_offline()
     except (OSError, AttributeError):
         return False
 
@@ -260,7 +273,7 @@ def tick(dry_run=False):
         if service_active(rid) and runner_idle(d, workers)
     }
 
-    plan = decide(load, high_ticks, paused, idle, lid_closed=_lid_closed())
+    plan = decide(load, high_ticks, paused, idle, held_offline=_lid_watchdog_holds())
 
     if dry_run:
         print(
@@ -330,7 +343,7 @@ def status():
         for rid, d in runners.items()
         if service_active(rid) and runner_idle(d, workers)
     }
-    plan = decide(load, high_ticks, paused, idle, lid_closed=_lid_closed())
+    plan = decide(load, high_ticks, paused, idle, held_offline=_lid_watchdog_holds())
     print(f"host load (per-core): {load:.2f}   thresholds: pause>{HIGH} resume<{LOW}")
     print(f"runners: {sorted(runners)}")
     print(f"idle:    {sorted(idle)}")

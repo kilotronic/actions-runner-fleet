@@ -108,7 +108,7 @@ class DecideTest(unittest.TestCase):
             low=LOW,
             high=HIGH,
             debounce=DEBOUNCE,
-            lid_closed=True,
+            held_offline=True,
         )
         self.assertEqual(p.to_resume, [])
         self.assertEqual(p.to_pause, [])
