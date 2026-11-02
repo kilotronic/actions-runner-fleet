@@ -292,16 +292,20 @@ ENV
   [[ -n "$REG_TOKEN" ]] || die "Failed to obtain registration token"
 
   info "  Configuring..."
-  # No --labels: the runner applies self-hosted, its OS and its real
-  # architecture as default labels on its own. Passing them could only ever
-  # add a wrong one; host-specific extras come from runners.toml via apply.py.
+  # Only the host's extra labels (EXTRA_LABELS, from runners.toml via apply.py):
+  # the runner applies self-hosted, its OS and its real architecture on its own.
+  CONFIG_FLAGS=()
+  if [[ -n "${EXTRA_LABELS:-}" ]]; then
+    CONFIG_FLAGS+=(--labels "$EXTRA_LABELS")
+  fi
   "$RUNNER_DIR/config.sh" \
     --url "https://github.com/${REPO}" \
     --token "$REG_TOKEN" \
     --name "$RUNNER_NAME" \
     --work "_work" \
     --replace \
-    --unattended
+    --unattended \
+    ${CONFIG_FLAGS[@]+"${CONFIG_FLAGS[@]}"}
 
   mkdir -p "$RUNNER_DIR/logs"
 

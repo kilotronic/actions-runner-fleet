@@ -283,14 +283,16 @@ ENV
   # today — until GitHub forces it offline for falling below the minimum
   # agent version. The array + ${arr[@]+"..."} expansion is empty-array-safe
   # under `set -u` on bash 3.2.
-  UPDATE_FLAGS=()
+  CONFIG_FLAGS=()
   if [[ -n "${WORK_ROOT:-}" ]]; then
-    UPDATE_FLAGS+=(--disableupdate)
+    CONFIG_FLAGS+=(--disableupdate)
   fi
   info "  Configuring..."
-  # No --labels: the runner applies self-hosted, its OS and its real
-  # architecture as default labels on its own. Passing them could only ever
-  # add a wrong one; host-specific extras come from runners.toml via apply.py.
+  # Only the host's extra labels (EXTRA_LABELS, from runners.toml via apply.py):
+  # the runner applies self-hosted, its OS and its real architecture on its own.
+  if [[ -n "${EXTRA_LABELS:-}" ]]; then
+    CONFIG_FLAGS+=(--labels "$EXTRA_LABELS")
+  fi
   "$RUNNER_DIR/config.sh" \
     --url "https://github.com/${REPO}" \
     --token "$REG_TOKEN" \
@@ -298,7 +300,7 @@ ENV
     --work "_work" \
     --replace \
     --unattended \
-    ${UPDATE_FLAGS[@]+"${UPDATE_FLAGS[@]}"}
+    ${CONFIG_FLAGS[@]+"${CONFIG_FLAGS[@]}"}
 
   # Install hooks
   HOOKS_SRC="$(cd "$(dirname "$0")" && pwd)/hooks"
