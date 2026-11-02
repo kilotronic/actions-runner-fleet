@@ -1303,3 +1303,19 @@ class PoolReregisterTest(unittest.TestCase):
         self.assertIn("--no-default-labels", argv)
         self.assertEqual(argv[argv.index("--labels") + 1], "gate")
         self.assertEqual(argv[argv.index("--name") + 1], "host-a-app-gate-1")
+
+
+class PoolEnvUpdatesTest(unittest.TestCase):
+    """A pool job is light and never needs containers, so its runner opts out of
+    the job-started OrbStack check through the hook's CONTAINER_RUNTIME override."""
+
+    def test_pool_runner_opts_out_of_the_container_runtime(self):
+        updates = apply.runner_env_updates(
+            "app-gate-1", ci_slots=2, e2e_workers=None, gated=False, pool=True
+        )
+        self.assertEqual(updates["CONTAINER_RUNTIME"], "none")
+        self.assertNotIn("CI_SLOTS", updates)
+
+    def test_main_runner_leaves_the_container_runtime_to_the_config(self):
+        updates = apply.runner_env_updates("app-1", 2, None, gated=True)
+        self.assertNotIn("CONTAINER_RUNTIME", updates)

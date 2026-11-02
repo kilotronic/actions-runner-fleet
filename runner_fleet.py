@@ -171,7 +171,10 @@ def main(argv=None):
         # in hooks/ensure-orbstack.sh's _any_runner_busy.
         try:
             workers = worker_cmdlines()
-            return 0 if any(is_busy(r, workers) for r in discover_runners()) else 1
+            # A pool runner's long, light jobs never touch containers, and they
+            # can be waiting on the very runs a wedged runtime stalls.
+            runners = [r for r in discover_runners() if not is_pool_runner(r)]
+            return 0 if any(is_busy(r, workers) for r in runners) else 1
         except Exception:
             return 0
 

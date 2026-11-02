@@ -87,7 +87,7 @@ def upsert_env(text: str, updates: dict) -> str | None:
 
 
 def runner_env_updates(
-    dirname: str, ci_slots: int, e2e_workers: int | None, gated: bool
+    dirname: str, ci_slots: int, e2e_workers: int | None, gated: bool, pool: bool = False
 ) -> dict:
     """The .env keys apply.py converges into one runner. Pure.
 
@@ -103,8 +103,13 @@ def runner_env_updates(
     Per runner, not one shared dir: two runners on a host can hold jobs at the
     same time, and the job-completed hook that empties this one must not be
     able to delete another job's in-flight temp.
+
+    A label-only pool's runner gets CONTAINER_RUNTIME=none, job-started.sh's
+    override: its light jobs never need the host's OrbStack check.
     """
     updates: dict[str, str | None] = {"TMPDIR": str(RUNNER_BASE / dirname / "_tmp")}
+    if pool:
+        updates["CONTAINER_RUNTIME"] = "none"
     if gated:
         updates["CI_SLOTS"] = str(ci_slots)
         updates["E2E_WORKERS_OVERRIDE"] = (
@@ -794,40 +799,24 @@ def install_runners(
     """
     suffix = "" if IS_MAC else "-linux"
     cmd = [str(SCRIPT_DIR / f"install{suffix}.sh"), repo, str(desired)]
-    env = {**os.environ, "CI_SLOTS": str(ci_slots)}
-    shown = f"CI_SLOTS={ci_slots}"
-    if work_root:
-        env["WORK_ROOT"] = work_root
-        shown += f" WORK_ROOT={work_root}"
-    else:
-        # Don't leak a stale WORK_ROOT from the installing host's ambient env
-        # into a host that leaves _work on the internal disk (mirrors the
-        # E2E_WORKERS_OVERRIDE pop below).
-        env.pop("WORK_ROOT", None)
-    if e2e_workers is not None:
-        env["E2E_WORKERS_OVERRIDE"] = str(e2e_workers)
-        shown += f" E2E_WORKERS_OVERRIDE={e2e_workers}"
-    else:
-        # install.sh only omits the .env line when this var is unset in ITS
-        # environment ([[ -n "${E2E_WORKERS_OVERRIDE:-}" ]]) — apply.py itself
-        # always runs with E2E_WORKERS_OVERRIDE already set (baked into every
-        # runner's own .env for the host's sizing), so a bare
-        # os.environ copy silently leaks that stale value into repos where
-        # it's meant to stay unmanaged. Pop it explicitly. (Caught 2026-07-16:
-        # a second repo's fresh .env inherited E2E_WORKERS_OVERRIDE=3 from the
-        # installing host's ambient env.)
-        env.pop("E2E_WORKERS_OVERRIDE", None)
-    if extra_labels:
-        env["EXTRA_LABELS"] = ",".join(extra_labels)
-        shown += f" EXTRA_LABELS={env['EXTRA_LABELS']}"
-    else:
-        env.pop("EXTRA_LABELS", None)
-    env.pop("POOL_LABEL", None)
+    # Every key the installer reads is set here or removed: apply.py itself runs
+    # with a runner's .env in its environment (CI_SLOTS, E2E_WORKERS_OVERRIDE,
+    # ...), and an inherited value would be baked into a runner meant to leave
+    # it unmanaged. (Caught 2026-07-16: a second repo's fresh .env inherited
+    # E2E_WORKERS_OVERRIDE=3 from the installing host's ambient env.)
+    managed = ("CI_SLOTS", "E2E_WORKERS_OVERRIDE", "EXTRA_LABELS", "POOL_LABEL", "WORK_ROOT")
     if pool is not None:
-        for key in ("CI_SLOTS", "E2E_WORKERS_OVERRIDE", "EXTRA_LABELS"):
-            env.pop(key, None)
-        env["POOL_LABEL"] = pool
-        shown = f"POOL_LABEL={pool}" + (f" WORK_ROOT={work_root}" if work_root else "")
+        exports = {"POOL_LABEL": pool}
+    else:
+        exports = {"CI_SLOTS": str(ci_slots)}
+        if e2e_workers is not None:
+            exports["E2E_WORKERS_OVERRIDE"] = str(e2e_workers)
+        if extra_labels:
+            exports["EXTRA_LABELS"] = ",".join(extra_labels)
+    if work_root:
+        exports["WORK_ROOT"] = work_root
+    env = {k: v for k, v in os.environ.items() if k not in managed} | exports
+    shown = " ".join(f"{k}={v}" for k, v in exports.items())
     print(f"  $ {shown} {' '.join(cmd)}")
     return subprocess.call(cmd, env=env) == 0
 
@@ -1232,7 +1221,11 @@ def main() -> int:
             new_text = upsert_env(
                 env_path.read_text(),
                 runner_env_updates(
-                    dn, ci_slots, e2e_workers, pool is None and repo_name in gated
+                    dn,
+                    ci_slots,
+                    e2e_workers,
+                    pool is None and repo_name in gated,
+                    pool=pool is not None,
                 ),
             )
             if new_text is not None:

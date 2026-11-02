@@ -155,3 +155,8 @@ def test_installer_registers_a_pool_runner_with_only_its_label(installer):
     assert 'CONFIG_FLAGS+=(--no-default-labels --labels "$POOL_LABEL")' in text
     assert 'RUNNER_DIR="$BASE_DIR/${STEM}-${i}"' in text
     assert "${REPO_NAME}-${i}" not in text
+    # A pool job skips the job-started OrbStack check from its very first job.
+    assert re.search(
+        r'if \[\[ -n "\$\{POOL_LABEL:-\}" \]\]; then\n\s*echo "CONTAINER_RUNTIME=none" >>"\$RUNNER_DIR/.env"',
+        text,
+    )

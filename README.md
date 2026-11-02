@@ -56,6 +56,9 @@ like the repo's main runners (idle-guarded removal, the removal cap,
 
 - `ci_slots` and `fleet.slot_gated_repos` never cap a pool, and its runners get
   no `CI_SLOTS` or `E2E_WORKERS_OVERRIDE` in their `.env`.
+- Their `.env` sets `CONTAINER_RUNTIME=none`, so a pool job skips the
+  job-started OrbStack check, and a busy pool runner never keeps the OrbStack
+  watchdog from recovering a wedged runtime.
 - The load watchdog never pauses them. The lid watchdog still does: a laptop
   that is shut or on battery is no place for a job of any size.
 

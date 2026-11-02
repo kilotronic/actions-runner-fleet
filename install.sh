@@ -257,6 +257,11 @@ ENV
   # existed BEFORE this install, so a runner added this pass would otherwise
   # spend its first jobs on the shared /tmp — the very thing being avoided.
   echo "TMPDIR=$RUNNER_DIR/_tmp" >>"$RUNNER_DIR/.env"
+  # A pool's light jobs skip job-started.sh's OrbStack check (its
+  # CONTAINER_RUNTIME override), as apply.py's runner_env_updates converges.
+  if [[ -n "${POOL_LABEL:-}" ]]; then
+    echo "CONTAINER_RUNTIME=none" >>"$RUNNER_DIR/.env"
+  fi
   mkdir -p "$RUNNER_DIR/_tmp"
 
   # When _work is offloaded (above), tell the job-started mount-guard which path
