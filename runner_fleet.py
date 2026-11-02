@@ -73,6 +73,24 @@ def is_busy(runner, workers=None):
     return any(needle in ln for ln in workers)
 
 
+def pool_label(dirname, repo_name):
+    """The label-only pool a runner dir belongs to, or None for the repo's main pool.
+
+    Main runners live in <repo_name>-<n>, a pool's in <repo_name>-<label>-<n>.
+    A label starts with a letter (fleet_config enforces it), so a main dir never
+    parses as a pool.
+    """
+    m = re.match(re.escape(repo_name) + r"-([A-Za-z][\w.-]*)-\d+$", dirname)
+    return m.group(1) if m else None
+
+
+def is_pool_runner(runner):
+    """True iff `runner` (a Runner) belongs to a label-only pool of its repo."""
+    if runner.repo is None:
+        return False
+    return pool_label(runner.dir.name, runner.repo.split("/")[-1]) is not None
+
+
 # ── Adapters (real OS state) ───────────────────────────────────────────────
 
 

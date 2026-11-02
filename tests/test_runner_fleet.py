@@ -274,5 +274,32 @@ class MainAnyBusyTest(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class PoolLabelTest(unittest.TestCase):
+    """A repo's main runners live in <repo>-<n>; a label-only pool's in
+    <repo>-<label>-<n>. Both share the <repo>- prefix, so every consumer that
+    tells them apart must use this one parse."""
+
+    def test_main_pool_dir_has_no_pool_label(self):
+        self.assertIsNone(runner_fleet.pool_label("app-1", "app"))
+        self.assertIsNone(runner_fleet.pool_label("app-12", "app"))
+
+    def test_pool_dir_yields_its_label(self):
+        self.assertEqual(runner_fleet.pool_label("app-gate-1", "app"), "gate")
+        self.assertEqual(runner_fleet.pool_label("app-gate.x-3", "app"), "gate.x")
+        self.assertEqual(runner_fleet.pool_label("app-long-gate-2", "app"), "long-gate")
+
+    def test_another_repos_dir_is_not_a_pool(self):
+        self.assertIsNone(runner_fleet.pool_label("docs-1", "app"))
+        self.assertIsNone(runner_fleet.pool_label("apps-gate-1", "app"))
+
+    def test_is_pool_runner_reads_the_repo_from_the_registration(self):
+        pool = runner_fleet.Runner(Path("/b/app-gate-1"), "h-app-gate-1", "o/app")
+        main = runner_fleet.Runner(Path("/b/app-gate-1"), "h-app-gate-1", "o/app-gate")
+        unknown = runner_fleet.Runner(Path("/b/app-gate-1"), "app-gate-1", None)
+        self.assertTrue(runner_fleet.is_pool_runner(pool))
+        self.assertFalse(runner_fleet.is_pool_runner(main))
+        self.assertFalse(runner_fleet.is_pool_runner(unknown))
+
+
 if __name__ == "__main__":
     unittest.main()

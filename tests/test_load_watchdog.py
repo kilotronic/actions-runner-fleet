@@ -129,5 +129,35 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(p.high_ticks, 0)
 
 
+class PausableTest(unittest.TestCase):
+    """A label-only pool's runners are never paused for load: they hold light
+    jobs that wait on the heavy ones, so taking them offline when the host is
+    busiest would stall the line exactly when it is longest."""
+
+    def test_pool_runners_are_never_pausable(self):
+        import runner_fleet
+
+        fleet = [
+            runner_fleet.Runner(Path("/b/app-1"), "h-app-1", "o/app"),
+            runner_fleet.Runner(Path("/b/app-gate-1"), "h-app-gate-1", "o/app"),
+        ]
+        idle = lw.idle_runners(fleet, workers=[], active=lambda rid: True)
+        self.assertEqual(idle, {"app-1"})
+
+    def test_busy_or_stopped_runners_are_not_idle(self):
+        import runner_fleet
+
+        fleet = [
+            runner_fleet.Runner(Path("/b/app-1"), "h-app-1", "o/app"),
+            runner_fleet.Runner(Path("/b/app-2"), "h-app-2", "o/app"),
+        ]
+        idle = lw.idle_runners(
+            fleet,
+            workers=["/b/app-1/bin/Runner.Worker spawnclient"],
+            active=lambda rid: rid != "app-2",
+        )
+        self.assertEqual(idle, set())
+
+
 if __name__ == "__main__":
     unittest.main()

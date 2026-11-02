@@ -27,6 +27,7 @@ HostConfig = namedtuple(
         "labels",
         "container_runtime",
         "slot_gated_repos",
+        "pools",
     ],
 )
 
@@ -41,7 +42,14 @@ _HOST_RESERVED = (
     "labels",
     "container_runtime",
     "ollama_serve",
+    "pools",
 )
+
+_REPO_RE = r"^[^/]+/[^/]+$"
+_POOL_LABEL_RE = r"^[A-Za-z][A-Za-z0-9_.-]*$"
+# The runner's own default labels. A pool carrying one would take the very
+# `runs-on: self-hosted` jobs it registers with --no-default-labels to avoid.
+_DEFAULT_LABELS = frozenset({"self-hosted", "linux", "macos", "windows", "x64", "arm", "arm64"})
 
 
 def resolve_config_path(*, explicit=None, env=None, home=None) -> Path:
@@ -140,6 +148,7 @@ def load_host(config_path: Path, host: str) -> HostConfig:
             )
 
     entry.pop("ollama_serve", None)
+    pools = _parse_pools(entry.pop("pools", None), host, entry, hosts)
 
     out: dict[str, int] = {}
     for repo, count in entry.items():
@@ -147,7 +156,7 @@ def load_host(config_path: Path, host: str) -> HostConfig:
             raise SystemExit(
                 f"error: {repo} count must be a non-negative integer, got {count!r}"
             )
-        if not re.match(r"^[^/]+/[^/]+$", repo):
+        if not re.match(_REPO_RE, repo):
             raise SystemExit(f"error: repo '{repo}' must be in owner/repo form")
         out[repo] = count
 
@@ -159,7 +168,71 @@ def load_host(config_path: Path, host: str) -> HostConfig:
         labels=extra_labels,
         container_runtime=container_runtime,
         slot_gated_repos=slot_gated_repos,
+        pools=pools,
     )
+
+
+def _parse_pools(raw, host: str, repo_counts: dict, hosts: dict) -> dict[str, dict[str, int]]:
+    """{owner/repo: {label: count}} from a host's `pools` table.
+
+    A pool's runners live in <repo_name>-<label>-<n>, so its label must start
+    with a letter (keeping it apart from the main pool's <repo_name>-<n>), and
+    that stem must not be any other repo's or pool's on this host. Its label must
+    not be a default label or any host's `labels`, or `runs-on: <label>` would
+    also reach ordinary runners.
+    """
+    if raw is None:
+        return {}
+    where = f"pools for host '{host}'"
+    if not isinstance(raw, dict):
+        raise SystemExit(f"error: {where} must be a table of owner/repo tables, got {raw!r}")
+    host_labels = {
+        lbl.lower()
+        for h in hosts.values()
+        if isinstance(h, dict) and isinstance(h.get("labels"), list)
+        for lbl in h["labels"]
+        if isinstance(lbl, str)
+    }
+    main_stems = {r.split("/")[-1].lower() for r in [*repo_counts, *raw]}
+    pool_stems: set[str] = set()
+    out: dict[str, dict[str, int]] = {}
+    for repo, labels in raw.items():
+        if not re.match(_REPO_RE, repo):
+            raise SystemExit(f"error: {where}: '{repo}' must be in owner/repo form")
+        if not isinstance(labels, dict):
+            raise SystemExit(
+                f"error: {where}: {repo} must be a table of label = count, got {labels!r}"
+            )
+        out[repo] = {}
+        for label, count in labels.items():
+            if not re.match(_POOL_LABEL_RE, label):
+                raise SystemExit(
+                    f"error: {where}: {repo} label '{label}' must start with a letter "
+                    "and hold only letters, digits, '_', '.' and '-'"
+                )
+            if label.lower() in _DEFAULT_LABELS:
+                raise SystemExit(
+                    f"error: {where}: {repo} label '{label}' is a runner default label"
+                )
+            if label.lower() in host_labels:
+                raise SystemExit(
+                    f"error: {where}: {repo} label '{label}' is also in a host's "
+                    "labels, so ordinary runners would take its jobs"
+                )
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                raise SystemExit(
+                    f"error: {where}: {repo} {label} count must be a non-negative "
+                    f"integer, got {count!r}"
+                )
+            stem = f"{repo.split('/')[-1]}-{label}"
+            if stem.lower() in main_stems or stem.lower() in pool_stems:
+                raise SystemExit(
+                    f"error: {where}: {repo} pool '{label}' would keep its runners in "
+                    f"{stem}-<n>, which another repo or pool on this host also uses"
+                )
+            pool_stems.add(stem.lower())
+            out[repo][label] = count
+    return out
 
 
 def this_host() -> str:
