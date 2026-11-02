@@ -107,6 +107,38 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(p.to_remove, [])
         self.assertFalse(p.capped)
 
+    def test_busy_excess_is_reported_as_deferred(self):
+        # A busy runner over target is skipped, not in sync: the plan names it
+        # so the run says it is waiting rather than claiming nothing to do.
+        p = self.decide(0, ["app-1"], [reg("app-1")], busy_dirs={"app-1"})
+        self.assertEqual(p.to_remove, [])
+        self.assertEqual(p.deferred_busy, ["app-1"])
+
+    def test_only_the_busy_shortfall_is_deferred(self):
+        p = self.decide(
+            0,
+            ["app-1", "app-2", "app-3"],
+            [reg("app-1"), reg("app-2"), reg("app-3")],
+            busy_dirs={"app-3"},
+        )
+        self.assertEqual(p.to_remove, ["app-2", "app-1"])
+        self.assertEqual(p.deferred_busy, ["app-3"])
+
+    def test_busy_runner_within_target_is_not_deferred(self):
+        p = self.decide(
+            1,
+            ["app-1", "app-2"],
+            [reg("app-1"), reg("app-2")],
+            busy_dirs={"app-2"},
+        )
+        self.assertEqual(p.deferred_busy, [])
+
+    def test_no_auto_prune_defers_nothing(self):
+        p = self.decide(
+            0, ["app-1"], [reg("app-1")], busy_dirs={"app-1"}, allow_remove=False
+        )
+        self.assertEqual(p.deferred_busy, [])
+
     def test_blast_radius_cap_refuses_and_flags(self):
         # want 0, have 5 idle healthy → 5 removals > cap 2 → refuse all, flag capped.
         dirs = [f"app-{i}" for i in range(1, 6)]
@@ -562,6 +594,16 @@ class InstallRunnersEnvTest(unittest.TestCase):
     def test_exports_work_root_when_set(self):
         env = self._call_env(3, "/Volumes/Dev/jason/runner-work")
         self.assertEqual(env["WORK_ROOT"], "/Volumes/Dev/jason/runner-work")
+
+    def test_exports_extra_labels_so_a_new_runner_registers_with_them(self):
+        with mock.patch.object(apply.subprocess, "call", return_value=0) as call:
+            apply.install_runners("o/app", 2, 4, None, None, ("gpu", "fast-disk"))
+        self.assertEqual(call.call_args.kwargs["env"]["EXTRA_LABELS"], "gpu,fast-disk")
+
+    def test_omits_extra_labels_when_none(self):
+        with mock.patch.dict(apply.os.environ, {"EXTRA_LABELS": "stale"}):
+            env = self._call_env(None, None)
+        self.assertNotIn("EXTRA_LABELS", env)
 
     def test_omits_work_root_when_unset(self):
         # Even if the installing host's ambient env carries a stale WORK_ROOT,

@@ -115,7 +115,9 @@ def runner_env_updates(
 # ── Pure convergence core (no I/O — unit-tested in test_apply.py) ─────────────
 
 Plan = namedtuple(
-    "Plan", ["to_reregister", "to_install", "to_remove", "to_cleanup", "capped"]
+    "Plan",
+    ["to_reregister", "to_install", "to_remove", "to_cleanup", "capped", "deferred_busy"],
+    defaults=((),),
 )
 
 
@@ -172,6 +174,7 @@ def decide(
     to_install = 0
     to_remove = []
     to_cleanup = []
+    deferred_busy = []
 
     if len(healthy) < desired:
         need = desired - len(healthy)
@@ -188,17 +191,22 @@ def decide(
                 reverse=True,  # drop the highest indices first, keep -1, -2 stable
             )
             to_remove = idle_healthy[:excess]
+            busy_healthy = sorted(
+                (d for d in healthy if d in busy_dirs), key=_dir_index, reverse=True
+            )
+            deferred_busy = busy_healthy[: excess - len(to_remove)]
 
     capped = False
     if not allow_remove:
         # .no-auto-prune: suppress all destructive removals (adds/reregister stay).
         to_remove = []
         to_cleanup = []
+        deferred_busy = []
     elif len(to_remove) > max_remove:
         capped = True
         to_remove = []
 
-    return Plan(to_reregister, to_install, to_remove, to_cleanup, capped)
+    return Plan(to_reregister, to_install, to_remove, to_cleanup, capped, deferred_busy)
 
 
 # ── Hung-listener detection (pure; unit-tested in test_apply.py) ─────────────
@@ -720,6 +728,7 @@ def install_runners(
     ci_slots: int,
     e2e_workers: int | None,
     work_root: str | None = None,
+    extra_labels: tuple[str, ...] = (),
 ) -> bool:
     """Fill a shortfall via the existing installer (idempotent: skips existing dirs).
 
@@ -728,7 +737,8 @@ def install_runners(
     workflow reads them (an in-job admission gate, a browser-e2e worker count).
     Exports
     WORK_ROOT when the host offloads _work to an external drive, so install.sh
-    symlinks each new runner's _work there.
+    symlinks each new runner's _work there. Exports EXTRA_LABELS so a new
+    runner registers with the host's labels, as reregister() does.
     """
     suffix = "" if IS_MAC else "-linux"
     cmd = [str(SCRIPT_DIR / f"install{suffix}.sh"), repo, str(desired)]
@@ -755,6 +765,11 @@ def install_runners(
         # a second repo's fresh .env inherited E2E_WORKERS_OVERRIDE=3 from the
         # installing host's ambient env.)
         env.pop("E2E_WORKERS_OVERRIDE", None)
+    if extra_labels:
+        env["EXTRA_LABELS"] = ",".join(extra_labels)
+        shown += f" EXTRA_LABELS={env['EXTRA_LABELS']}"
+    else:
+        env.pop("EXTRA_LABELS", None)
     print(f"  $ {shown} {' '.join(cmd)}")
     return subprocess.call(cmd, env=env) == 0
 
@@ -1170,7 +1185,8 @@ def main() -> int:
             labels_added = converge_labels(repo, gh, extra_labels)
 
         acted = (
-            plan.to_reregister
+            plan.deferred_busy
+            or plan.to_reregister
             or plan.to_install
             or plan.to_remove
             or plan.to_cleanup
@@ -1199,6 +1215,8 @@ def main() -> int:
             print(f"[{repo}] install {plan.to_install} new → target {D}")
         for dn in plan.to_remove:
             print(f"[{repo}] remove (idle) {dn}")
+        for dn in plan.deferred_busy:
+            print(f"[{repo}] remove {dn} (busy — deferring)")
         for dn in plan.to_cleanup:
             print(f"[{repo}] cleanup dead {dn}")
         for dn, _ in env_work:
@@ -1215,7 +1233,7 @@ def main() -> int:
             if not reregister(repo, dn, host, work_root, extra_labels):
                 failed += 1
         if plan.to_install and not install_runners(
-            repo, D, ci_slots, e2e_workers, work_root
+            repo, D, ci_slots, e2e_workers, work_root, extra_labels
         ):
             failed += 1
         for dn in plan.to_remove:
