@@ -195,6 +195,22 @@ def runner_idle(runner_dir, workers=None):
     return not runner_fleet.is_busy(runner_dir, workers)
 
 
+def idle_runners(fleet, workers, active=None):
+    """Ids of the runners in `fleet` (runner_fleet.Runner list) this watchdog may
+    pause: service running, no job, and not in a label-only pool. A pool runner
+    holds light jobs that wait on the heavy ones, so taking it offline under
+    load would stall that line exactly when it is longest.
+    """
+    active = active or service_active
+    return {
+        r.dir.name
+        for r in fleet
+        if not runner_fleet.is_pool_runner(r)
+        and active(r.dir.name)
+        and runner_idle(r.dir, workers)
+    }
+
+
 # ── Service control (launchd on macOS, systemd --user on Linux) ───────────────
 
 
@@ -265,13 +281,9 @@ def tick(dry_run=False):
 
     load = per_core_load()
     high_ticks, paused = load_state()
-    runners = discover_runners()
-    workers = runner_fleet.worker_cmdlines()
-    idle = {
-        rid
-        for rid, d in runners.items()
-        if service_active(rid) and runner_idle(d, workers)
-    }
+    fleet = runner_fleet.discover_runners(base_dir=BASE_DIR)
+    runners = {r.dir.name: r.dir for r in fleet}
+    idle = idle_runners(fleet, runner_fleet.worker_cmdlines())
 
     plan = decide(load, high_ticks, paused, idle, held_offline=_lid_watchdog_holds())
 
@@ -336,13 +348,9 @@ def uninstall_timer():
 def status():
     load = per_core_load()
     high_ticks, paused = load_state()
-    runners = discover_runners()
-    workers = runner_fleet.worker_cmdlines()
-    idle = {
-        rid
-        for rid, d in runners.items()
-        if service_active(rid) and runner_idle(d, workers)
-    }
+    fleet = runner_fleet.discover_runners(base_dir=BASE_DIR)
+    runners = {r.dir.name: r.dir for r in fleet}
+    idle = idle_runners(fleet, runner_fleet.worker_cmdlines())
     plan = decide(load, high_ticks, paused, idle, held_offline=_lid_watchdog_holds())
     print(f"host load (per-core): {load:.2f}   thresholds: pause>{HIGH} resume<{LOW}")
     print(f"runners: {sorted(runners)}")

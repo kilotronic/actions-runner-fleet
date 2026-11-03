@@ -102,3 +102,72 @@ def test_cli_prints_empty_when_unset(tmp_path, monkeypatch):
     p.write_text('[hosts.box]\n"acme/app" = 1\n', encoding="utf-8")
     monkeypatch.setenv("ACTIONS_RUNNER_CONFIG", str(p))
     assert fleet_config.container_runtime_for_this_host(host="box") == ""
+
+
+# ── Label-only pools ──────────────────────────────────────────────────────────
+
+POOL_HOST = '[hosts.box]\nlabels = ["bigmem"]\n"acme/app" = 2\n'
+
+
+def _pools(tmp_path, pools_toml, head=POOL_HOST, extra=""):
+    p = tmp_path / "runners.toml"
+    p.write_text(head + pools_toml + extra, encoding="utf-8")
+    return fleet_config.load_host(p, "box")
+
+
+def test_pools_parsed_apart_from_repo_counts(tmp_path):
+    host = _pools(tmp_path, '[hosts.box.pools."acme/app"]\ngate = 1\n')
+    assert host.pools == {"acme/app": {"gate": 1}}
+    assert host.counts == {"acme/app": 2}
+
+
+def test_pools_default_empty(tmp_path):
+    assert _pools(tmp_path, "").pools == {}
+
+
+def test_a_pool_only_repo_needs_no_main_count(tmp_path):
+    host = _pools(tmp_path, '[hosts.box.pools."acme/tools"]\ngate = 1\n')
+    assert host.pools == {"acme/tools": {"gate": 1}}
+    assert "acme/tools" not in host.counts
+
+
+@pytest.mark.parametrize(
+    "pools_toml,match",
+    [
+        ('pools = 3\n', "pools"),
+        ('[hosts.box.pools]\n"acme/app" = 1\n', "pools"),
+        ('[hosts.box.pools."app"]\ngate = 1\n', "owner/repo"),
+        ('[hosts.box.pools."acme/app"]\ngate = -1\n', "non-negative"),
+        ('[hosts.box.pools."acme/app"]\ngate = "1"\n', "non-negative"),
+        ('[hosts.box.pools."acme/app"]\n"2" = 1\n', "label"),
+        ('[hosts.box.pools."acme/app"]\n"has space" = 1\n', "label"),
+        # A pool carrying a default label would take ordinary self-hosted jobs.
+        ('[hosts.box.pools."acme/app"]\nself-hosted = 1\n', "default label"),
+        ('[hosts.box.pools."acme/app"]\nLinux = 1\n', "default label"),
+        # A label some host's main runners carry would route a pool's jobs to them.
+        ('[hosts.box.pools."acme/app"]\nbigmem = 1\n', "labels"),
+    ],
+)
+def test_bad_pools_exit(tmp_path, pools_toml, match):
+    with pytest.raises(SystemExit, match=match):
+        _pools(tmp_path, pools_toml)
+
+
+def test_pool_label_used_as_another_hosts_label_exits(tmp_path):
+    with pytest.raises(SystemExit, match="labels"):
+        _pools(
+            tmp_path,
+            '[hosts.box.pools."acme/app"]\ngate = 1\n',
+            extra='[hosts.other]\nlabels = ["gate"]\n"acme/app" = 1\n',
+        )
+
+
+def test_pool_dirs_that_would_collide_with_another_repos_exit(tmp_path):
+    # acme/app's pool "gate" lives in app-gate-<n>, which is exactly where a
+    # repo named app-gate keeps its main runners.
+    with pytest.raises(SystemExit, match="app-gate"):
+        _pools(
+            tmp_path,
+            '[hosts.box.pools."acme/app"]\ngate = 1\n',
+            head='[hosts.box]\n"acme/app" = 1\n"acme/app-gate" = 1\n',
+        )

@@ -31,6 +31,44 @@ container_runtime = "orbstack"  # opt-in host-lifetime OrbStack ensure
 "acme/app" = 2
 ```
 
+### Label-only pools
+
+A host can also run, per repo, runners that take only jobs asking for one
+label. They suit light, long-waiting jobs (an admission gate that polls until
+its run may proceed) that must neither pick up ordinary `self-hosted` jobs nor
+hold one of the host's CI slots:
+
+```toml
+[hosts.ci-mac]
+labels = ["bigmem"]
+"acme/app" = 2
+
+[hosts.ci-mac.pools."acme/app"]
+gate = 1        # label = runner count
+```
+
+A job with `runs-on: gate` lands only on these runners; `runs-on: self-hosted`
+never does. Each registers with `--no-default-labels` and its pool label alone
+(no `self-hosted`, OS or architecture labels, and none of the host's `labels`),
+lives in `~/actions-runner/app-gate-<n>` as `<host>-app-gate-<n>`, and converges
+like the repo's main runners (idle-guarded removal, the removal cap,
+`.no-auto-prune`), with these differences:
+
+- `ci_slots` and `fleet.slot_gated_repos` never cap a pool, and its runners get
+  no `CI_SLOTS` or `E2E_WORKERS_OVERRIDE` in their `.env`.
+- Their `.env` sets `CONTAINER_RUNTIME=none`, so a pool job skips the
+  job-started OrbStack check, and a busy pool runner never keeps the OrbStack
+  watchdog from recovering a wedged runtime.
+- The load watchdog never pauses them. The lid watchdog still does: a laptop
+  that is shut or on battery is no place for a job of any size.
+
+A label starts with a letter, must not be a runner default label
+(`self-hosted`, `linux`, `x64`, ...) or appear in any host's `labels`, and its
+`<repo>-<label>` must not be another repo's name on the host. Drop a pool (or
+set it to `0`) to drain it. Add the `pools` key only once every host listing
+it runs a kit that knows it: an older `apply.py` rejects the whole host entry
+and stops converging that host until its checkout updates.
+
 `ollama_serve = true` on a host publishes that box's local ollama
 (127.0.0.1:11434) to the tailnet via `tailscale serve`. Dropping the key tears
 the forwarder down. ollama's API is unauthenticated; restrict who can connect

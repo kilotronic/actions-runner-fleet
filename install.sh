@@ -57,6 +57,9 @@ fi
 
 REPO="$1"
 REPO_NAME="${REPO##*/}"
+# A label-only pool (POOL_LABEL, from a host's pools table via apply.py) lives
+# in <repo>-<label>-<n>, apart from the repo's main <repo>-<n> runners.
+STEM="${REPO_NAME}${POOL_LABEL:+-$POOL_LABEL}"
 WORKERS="${2:-1}"
 BASE_DIR="$HOME/actions-runner"
 CACHE_DIR="$BASE_DIR/.cache"
@@ -170,9 +173,9 @@ XDIST_AUTO_WORKERS="${PYTEST_XDIST_AUTO_NUM_WORKERS:-$((PHYS_CORES / 2 > 2 ? PHY
 # ── Install each worker ──────────────────────────────────────────────────────
 
 for i in $(seq 1 "$WORKERS"); do
-  RUNNER_DIR="$BASE_DIR/${REPO_NAME}-${i}"
-  RUNNER_NAME="${HOSTNAME}-${REPO_NAME}-${i}"
-  PLIST_LABEL="com.github.actions-runner.${REPO_NAME}-${i}"
+  RUNNER_DIR="$BASE_DIR/${STEM}-${i}"
+  RUNNER_NAME="${HOSTNAME}-${STEM}-${i}"
+  PLIST_LABEL="com.github.actions-runner.${STEM}-${i}"
   PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
 
   echo ""
@@ -218,7 +221,7 @@ for i in $(seq 1 "$WORKERS"); do
   # --work "_work" (below), which follows this symlink. The mount-guard in
   # hooks/job-started.sh aborts a job cleanly if the drive is absent.
   if [[ -n "${WORK_ROOT:-}" ]]; then
-    WORK_DIR="${WORK_ROOT%/}/${REPO_NAME}-${i}"
+    WORK_DIR="${WORK_ROOT%/}/${STEM}-${i}"
     mkdir -p "$WORK_DIR"
     rm -rf "$RUNNER_DIR/_work" # a symlink here removes only the link, not $WORK_DIR
     ln -s "$WORK_DIR" "$RUNNER_DIR/_work"
@@ -254,6 +257,11 @@ ENV
   # existed BEFORE this install, so a runner added this pass would otherwise
   # spend its first jobs on the shared /tmp — the very thing being avoided.
   echo "TMPDIR=$RUNNER_DIR/_tmp" >>"$RUNNER_DIR/.env"
+  # A pool's light jobs skip job-started.sh's OrbStack check (its
+  # CONTAINER_RUNTIME override), as apply.py's runner_env_updates converges.
+  if [[ -n "${POOL_LABEL:-}" ]]; then
+    echo "CONTAINER_RUNTIME=none" >>"$RUNNER_DIR/.env"
+  fi
   mkdir -p "$RUNNER_DIR/_tmp"
 
   # When _work is offloaded (above), tell the job-started mount-guard which path
@@ -290,7 +298,10 @@ ENV
   info "  Configuring..."
   # Only the host's extra labels (EXTRA_LABELS, from runners.toml via apply.py):
   # the runner applies self-hosted, its OS and its real architecture on its own.
-  if [[ -n "${EXTRA_LABELS:-}" ]]; then
+  # A pool runner carries its label alone, so no self-hosted job lands on it.
+  if [[ -n "${POOL_LABEL:-}" ]]; then
+    CONFIG_FLAGS+=(--no-default-labels --labels "$POOL_LABEL")
+  elif [[ -n "${EXTRA_LABELS:-}" ]]; then
     CONFIG_FLAGS+=(--labels "$EXTRA_LABELS")
   fi
   "$RUNNER_DIR/config.sh" \

@@ -1163,3 +1163,159 @@ class ReregisterLabelsTest(unittest.TestCase):
     def test_extra_labels_are_the_only_custom_labels(self):
         argv = self._argv(("bigmem",))
         self.assertEqual(argv[argv.index("--labels") + 1], "bigmem")
+
+
+# ── Label-only pools ──────────────────────────────────────────────────────────
+
+
+class ConvergenceTargetsTest(unittest.TestCase):
+    """A repo's main pool and its label-only pools converge as separate
+    targets, and a dir is only ever counted in the one it belongs to."""
+
+    def test_pool_dirs_are_kept_out_of_the_main_pool_and_vice_versa(self):
+        live = {"o/app": ["app-1", "app-2", "app-gate-1"]}
+        targets = apply.convergence_targets(
+            {"o/app": 2}, {"o/app": {"gate": 1}}, live
+        )
+        self.assertEqual(
+            targets,
+            [("o/app", None, 2, ["app-1", "app-2"]), ("o/app", "gate", 1, ["app-gate-1"])],
+        )
+
+    def test_a_pool_dropped_from_config_drains(self):
+        targets = apply.convergence_targets(
+            {"o/app": 1}, {}, {"o/app": ["app-1", "app-gate-1"]}
+        )
+        self.assertIn(("o/app", "gate", 0, ["app-gate-1"]), targets)
+        self.assertIn(("o/app", None, 1, ["app-1"]), targets)
+
+    def test_a_pool_only_repo_does_not_drain_its_main_pool_twice(self):
+        targets = apply.convergence_targets({}, {"o/app": {"gate": 2}}, {})
+        self.assertEqual(targets, [("o/app", "gate", 2, [])])
+
+    def test_a_main_pool_count_never_moves_to_a_pool(self):
+        # Every main dir counts toward the main target, so decide() on the pool
+        # sees an empty pool and installs, rather than adopting main runners.
+        targets = apply.convergence_targets(
+            {"o/app": 2}, {"o/app": {"gate": 1}}, {"o/app": ["app-1", "app-2"]}
+        )
+        self.assertIn(("o/app", "gate", 1, []), targets)
+
+
+class PoolRunnersTest(unittest.TestCase):
+    """GitHub lists every runner on the repo; the main pool's and each label-only
+    pool's registrations are split by name, so neither counts, removes, or
+    relabels the other's runners."""
+
+    GH = [
+        {"name": "host-a-app-1", "status": "online"},
+        {"name": "host-a-app-gate-1", "status": "online"},
+        {"name": "host-a-app-2", "status": "offline"},
+        {"name": "host-a-app-gate-2", "status": "online"},
+    ]
+
+    def test_main_pool_excludes_pool_registrations(self):
+        names = [r["name"] for r in apply.pool_runners(self.GH, "host-a", "app", None)]
+        self.assertEqual(names, ["host-a-app-1", "host-a-app-2"])
+
+    def test_pool_gets_only_its_own_registrations(self):
+        names = [
+            r["name"] for r in apply.pool_runners(self.GH, "host-a", "app", "gate")
+        ]
+        self.assertEqual(names, ["host-a-app-gate-1", "host-a-app-gate-2"])
+
+    def test_gh_failure_stays_none(self):
+        self.assertIsNone(apply.pool_runners(None, "host-a", "app", "gate"))
+
+    def test_host_labels_never_reach_pool_runners(self):
+        gh = [
+            {"name": "h-app-1", "id": 1, "status": "online", "labels": ["self-hosted"]},
+            {"name": "h-app-gate-1", "id": 2, "status": "online", "labels": ["gate"]},
+        ]
+        with mock.patch.object(apply, "_run", return_value=0) as r:
+            apply.converge_labels(
+                "o/app", apply.pool_runners(gh, "h", "app", None), ("bigmem",)
+            )
+        self.assertEqual(r.call_count, 1)
+        self.assertIn("repos/o/app/actions/runners/1/labels", r.call_args[0][0])
+
+
+class PoolInstalledDirsTest(unittest.TestCase):
+    def test_bare_dirs_split_between_main_and_pool(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            for name in ("app-1", "app-gate-1", "app-gate-x-1"):
+                (base / name).mkdir()
+                (base / name / "config.sh").touch()
+            with mock.patch.object(apply, "RUNNER_BASE", base):
+                self.assertEqual(apply.discover_installed_dirs("app"), ["app-1"])
+                self.assertEqual(
+                    apply.discover_installed_dirs("app", "gate"), ["app-gate-1"]
+                )
+
+
+class PoolInstallTest(unittest.TestCase):
+    """A pool runner must not carry the host's CI budget: a job that reads
+    CI_SLOTS from its runner's environment would take one of the heavy slots."""
+
+    def test_pool_install_names_the_pool_and_drops_the_budget(self):
+        ambient = {"CI_SLOTS": "2", "E2E_WORKERS_OVERRIDE": "3", "EXTRA_LABELS": "x"}
+        with (
+            mock.patch.dict(apply.os.environ, ambient),
+            mock.patch.object(apply.subprocess, "call", return_value=0) as call,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            apply.install_runners(
+                "o/app", 1, 4, 3, None, ("bigmem",), pool="gate"
+            )
+        env = call.call_args.kwargs["env"]
+        self.assertEqual(env["POOL_LABEL"], "gate")
+        for key in ("CI_SLOTS", "E2E_WORKERS_OVERRIDE", "EXTRA_LABELS"):
+            self.assertNotIn(key, env)
+
+    def test_main_install_never_inherits_a_pool_label(self):
+        with (
+            mock.patch.dict(apply.os.environ, {"POOL_LABEL": "gate"}),
+            mock.patch.object(apply.subprocess, "call", return_value=0) as call,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            apply.install_runners("o/app", 1, 4, None)
+        self.assertNotIn("POOL_LABEL", call.call_args.kwargs["env"])
+
+
+class PoolReregisterTest(unittest.TestCase):
+    def test_pool_reregisters_with_only_its_label(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            d = Path(tmpdir) / "app-gate-1"
+            d.mkdir()
+            (d / "config.sh").touch()
+            with (
+                mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)),
+                mock.patch.object(apply, "mint_token", return_value="tok"),
+                mock.patch.object(apply, "run", return_value=0) as run_cmd,
+                mock.patch.object(apply, "_svc_restart", return_value=True),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                apply.reregister(
+                    "o/app", "app-gate-1", "host-a", extra_labels=("bigmem",), pool="gate"
+                )
+            argv = run_cmd.call_args[0][0]
+        self.assertIn("--no-default-labels", argv)
+        self.assertEqual(argv[argv.index("--labels") + 1], "gate")
+        self.assertEqual(argv[argv.index("--name") + 1], "host-a-app-gate-1")
+
+
+class PoolEnvUpdatesTest(unittest.TestCase):
+    """A pool job is light and never needs containers, so its runner opts out of
+    the job-started OrbStack check through the hook's CONTAINER_RUNTIME override."""
+
+    def test_pool_runner_opts_out_of_the_container_runtime(self):
+        updates = apply.runner_env_updates(
+            "app-gate-1", ci_slots=2, e2e_workers=None, gated=False, pool=True
+        )
+        self.assertEqual(updates["CONTAINER_RUNTIME"], "none")
+        self.assertNotIn("CI_SLOTS", updates)
+
+    def test_main_runner_leaves_the_container_runtime_to_the_config(self):
+        updates = apply.runner_env_updates("app-1", 2, None, gated=True)
+        self.assertNotIn("CONTAINER_RUNTIME", updates)

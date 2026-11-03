@@ -143,3 +143,20 @@ def test_installer_registers_with_the_hosts_extra_labels(installer):
     text = (REPO / installer).read_text()
     assert 'CONFIG_FLAGS+=(--labels "$EXTRA_LABELS")' in text
     assert re.search(r'--unattended \\\n\s*\$\{CONFIG_FLAGS\[@\]\+"\$\{CONFIG_FLAGS\[@\]\}"\}', text)
+
+
+@pytest.mark.parametrize("installer", INSTALLERS)
+def test_installer_registers_a_pool_runner_with_only_its_label(installer):
+    """POOL_LABEL (apply.py, from a host's pools table) gives the runner its own
+    dir and name stem and no default labels, so `runs-on: self-hosted` never
+    lands on it."""
+    text = (REPO / installer).read_text()
+    assert 'STEM="${REPO_NAME}${POOL_LABEL:+-$POOL_LABEL}"' in text
+    assert 'CONFIG_FLAGS+=(--no-default-labels --labels "$POOL_LABEL")' in text
+    assert 'RUNNER_DIR="$BASE_DIR/${STEM}-${i}"' in text
+    assert "${REPO_NAME}-${i}" not in text
+    # A pool job skips the job-started OrbStack check from its very first job.
+    assert re.search(
+        r'if \[\[ -n "\$\{POOL_LABEL:-\}" \]\]; then\n\s*echo "CONTAINER_RUNTIME=none" >>"\$RUNNER_DIR/.env"',
+        text,
+    )

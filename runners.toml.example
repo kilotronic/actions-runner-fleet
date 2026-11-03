@@ -16,6 +16,11 @@ container_runtime = "orbstack"  # opt-in: job-started hook + 5-min watchdog
 "acme/app" = 2
 "acme/docs" = 1
 
+# Label-only pools: runners that take only `runs-on: <label>` jobs, never
+# `self-hosted` ones, and are not capped by ci_slots. label = count.
+[hosts.ci-mac.pools."acme/app"]
+gate = 1
+
 [hosts.ci-linux]
 ci_slots = 2
 ollama_serve = true  # opt-in: publish local ollama to the tailnet via tailscale serve

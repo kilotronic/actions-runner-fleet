@@ -87,7 +87,7 @@ def upsert_env(text: str, updates: dict) -> str | None:
 
 
 def runner_env_updates(
-    dirname: str, ci_slots: int, e2e_workers: int | None, gated: bool
+    dirname: str, ci_slots: int, e2e_workers: int | None, gated: bool, pool: bool = False
 ) -> dict:
     """The .env keys apply.py converges into one runner. Pure.
 
@@ -103,8 +103,13 @@ def runner_env_updates(
     Per runner, not one shared dir: two runners on a host can hold jobs at the
     same time, and the job-completed hook that empties this one must not be
     able to delete another job's in-flight temp.
+
+    A label-only pool's runner gets CONTAINER_RUNTIME=none, job-started.sh's
+    override: its light jobs never need the host's OrbStack check.
     """
     updates: dict[str, str | None] = {"TMPDIR": str(RUNNER_BASE / dirname / "_tmp")}
+    if pool:
+        updates["CONTAINER_RUNTIME"] = "none"
     if gated:
         updates["CI_SLOTS"] = str(ci_slots)
         updates["E2E_WORKERS_OVERRIDE"] = (
@@ -207,6 +212,31 @@ def decide(
         to_remove = []
 
     return Plan(to_reregister, to_install, to_remove, to_cleanup, capped, deferred_busy)
+
+
+def convergence_targets(counts, pools, live):
+    """[(repo, pool, desired, local_dirs)] to converge, one per pool. Pure.
+
+    counts  {repo: n} main-pool counts; pools  {repo: {label: n}} label-only
+    pools; live  {repo: [dirname]} registered dirs found on this host.
+
+    pool is None for a repo's main pool. Every repo with a count or a live dir
+    gets a main target, and every configured or live pool a pool target, so one
+    dropped from config drains (desired 0). Each dir lands in exactly one
+    target: runner_fleet.pool_label decides which.
+    """
+    out = []
+    for repo in sorted(set(counts) | set(live) | set(pools)):
+        repo_name = repo.split("/")[-1]
+        by_pool: dict = {}
+        for d in live.get(repo, []):
+            by_pool.setdefault(runner_fleet.pool_label(d, repo_name), []).append(d)
+        if repo in counts or repo in live:
+            out.append((repo, None, counts.get(repo, 0), by_pool.pop(None, [])))
+        wanted = pools.get(repo, {})
+        for label in sorted(set(wanted) | set(by_pool)):
+            out.append((repo, label, wanted.get(label, 0), by_pool.get(label, [])))
+    return out
 
 
 # ── Hung-listener detection (pure; unit-tested in test_apply.py) ─────────────
@@ -369,19 +399,22 @@ def discover_live() -> dict[str, list[Path]]:
     return live
 
 
-def discover_installed_dirs(repo_name: str) -> list[str]:
+def discover_installed_dirs(repo_name: str, pool: str | None = None) -> list[str]:
     """Basenames of installed runner dirs for `repo_name` that discover_live can't
     classify: `<repo_name>-<n>` dirs that have config.sh but no `.runner` (an
     interrupted re-register left them bare). They're unregistered but still real
     runners this host owns, so convergence must see them (to re-register or clean
     them up) instead of treating them as absent and installing duplicates.
+    With `pool`, the same for that label-only pool's `<repo_name>-<pool>-<n>`.
     """
     out: list[str] = []
     if not RUNNER_BASE.is_dir():
         return out
-    for entry in sorted(RUNNER_BASE.glob(f"{repo_name}-[0-9]*")):
+    stem = repo_name if pool is None else f"{repo_name}-{pool}"
+    for entry in sorted(RUNNER_BASE.glob(f"{stem}-[0-9]*")):
         if (
             entry.is_dir()
+            and runner_fleet.pool_label(entry.name, repo_name) == pool
             and (entry / "config.sh").is_file()
             and not (entry / ".runner").is_file()
         ):
@@ -456,6 +489,22 @@ def fetch_gh_runners(repo: str, host: str, repo_name: str):
                 }
             )
     return out
+
+
+def pool_runners(gh_runners, host: str, repo_name: str, pool: str | None):
+    """The registrations in `gh_runners` that belong to `pool` (None: the main
+    pool). Both share the `<host>-<repo_name>-` prefix fetch_gh_runners matches,
+    so without this split each would count, remove and relabel the other's.
+    """
+    if gh_runners is None:
+        return None
+    prefix = f"{host}-"
+    return [
+        r
+        for r in gh_runners
+        if r["name"].startswith(prefix)
+        and runner_fleet.pool_label(r["name"][len(prefix) :], repo_name) == pool
+    ]
 
 
 def converge_labels(repo: str, gh_runners, extra_labels) -> int:
@@ -666,6 +715,7 @@ def reregister(
     host: str,
     work_root: str | None = None,
     extra_labels: tuple[str, ...] = (),
+    pool: str | None = None,
 ) -> bool:
     """Re-register an installed runner in place (registration lost). Preserves .env.
 
@@ -710,8 +760,11 @@ def reregister(
     # No OS or architecture labels: the runner applies self-hosted, its OS and
     # its real architecture as default labels on its own. Hardcoding them tagged
     # every Linux runner X64 — a wrong custom label on an ARM machine. Only the
-    # host's extra labels from runners.toml are custom.
-    if extra_labels:
+    # host's extra labels from runners.toml are custom. A label-only pool's
+    # runner carries its label alone, so no self-hosted job can land on it.
+    if pool is not None:
+        cmd += ["--no-default-labels", "--labels", pool]
+    elif extra_labels:
         cmd += ["--labels", ",".join(extra_labels)]
     if work_root:
         cmd.append("--disableupdate")
@@ -729,6 +782,7 @@ def install_runners(
     e2e_workers: int | None,
     work_root: str | None = None,
     extra_labels: tuple[str, ...] = (),
+    pool: str | None = None,
 ) -> bool:
     """Fill a shortfall via the existing installer (idempotent: skips existing dirs).
 
@@ -739,37 +793,30 @@ def install_runners(
     WORK_ROOT when the host offloads _work to an external drive, so install.sh
     symlinks each new runner's _work there. Exports EXTRA_LABELS so a new
     runner registers with the host's labels, as reregister() does.
+
+    With `pool`, exports POOL_LABEL instead, and none of the host's budget or
+    labels: a pool runner takes no CI slot, and registers with its label alone.
     """
     suffix = "" if IS_MAC else "-linux"
     cmd = [str(SCRIPT_DIR / f"install{suffix}.sh"), repo, str(desired)]
-    env = {**os.environ, "CI_SLOTS": str(ci_slots)}
-    shown = f"CI_SLOTS={ci_slots}"
+    # Every key the installer reads is set here or removed: apply.py itself runs
+    # with a runner's .env in its environment (CI_SLOTS, E2E_WORKERS_OVERRIDE,
+    # ...), and an inherited value would be baked into a runner meant to leave
+    # it unmanaged. (Caught 2026-07-16: a second repo's fresh .env inherited
+    # E2E_WORKERS_OVERRIDE=3 from the installing host's ambient env.)
+    managed = ("CI_SLOTS", "E2E_WORKERS_OVERRIDE", "EXTRA_LABELS", "POOL_LABEL", "WORK_ROOT")
+    if pool is not None:
+        exports = {"POOL_LABEL": pool}
+    else:
+        exports = {"CI_SLOTS": str(ci_slots)}
+        if e2e_workers is not None:
+            exports["E2E_WORKERS_OVERRIDE"] = str(e2e_workers)
+        if extra_labels:
+            exports["EXTRA_LABELS"] = ",".join(extra_labels)
     if work_root:
-        env["WORK_ROOT"] = work_root
-        shown += f" WORK_ROOT={work_root}"
-    else:
-        # Don't leak a stale WORK_ROOT from the installing host's ambient env
-        # into a host that leaves _work on the internal disk (mirrors the
-        # E2E_WORKERS_OVERRIDE pop below).
-        env.pop("WORK_ROOT", None)
-    if e2e_workers is not None:
-        env["E2E_WORKERS_OVERRIDE"] = str(e2e_workers)
-        shown += f" E2E_WORKERS_OVERRIDE={e2e_workers}"
-    else:
-        # install.sh only omits the .env line when this var is unset in ITS
-        # environment ([[ -n "${E2E_WORKERS_OVERRIDE:-}" ]]) — apply.py itself
-        # always runs with E2E_WORKERS_OVERRIDE already set (baked into every
-        # runner's own .env for the host's sizing), so a bare
-        # os.environ copy silently leaks that stale value into repos where
-        # it's meant to stay unmanaged. Pop it explicitly. (Caught 2026-07-16:
-        # a second repo's fresh .env inherited E2E_WORKERS_OVERRIDE=3 from the
-        # installing host's ambient env.)
-        env.pop("E2E_WORKERS_OVERRIDE", None)
-    if extra_labels:
-        env["EXTRA_LABELS"] = ",".join(extra_labels)
-        shown += f" EXTRA_LABELS={env['EXTRA_LABELS']}"
-    else:
-        env.pop("EXTRA_LABELS", None)
+        exports["WORK_ROOT"] = work_root
+    env = {k: v for k, v in os.environ.items() if k not in managed} | exports
+    shown = " ".join(f"{k}={v}" for k, v in exports.items())
     print(f"  $ {shown} {' '.join(cmd)}")
     return subprocess.call(cmd, env=env) == 0
 
@@ -1039,6 +1086,7 @@ def main() -> int:
     host = short_hostname()
     host_cfg = fleet_config.load_host(CONFIG_FILE, host)
     desired = host_cfg.counts
+    pools = host_cfg.pools
     ci_slots = host_cfg.ci_slots
     e2e_workers = host_cfg.e2e_workers
     work_root = host_cfg.work_root
@@ -1075,6 +1123,8 @@ def main() -> int:
         header_shown = True
         print(f"host: {host}")
         print(f"desired: {dict(sorted(desired.items()))}")
+        if pools:
+            print(f"pools:   {dict(sorted(pools.items()))}")
         print(f"live:    {dict(sorted((r, len(d)) for r, d in live.items()))}")
         if not allow_remove:
             print(
@@ -1085,13 +1135,17 @@ def main() -> int:
     if args.dry_run:
         show_header()
 
-    # Converge every repo in config, plus repos present locally but no longer in
-    # config (desired 0 → drain the host of them, idle-guarded + cap-guarded).
-    all_repos = sorted(set(desired) | set(live))
+    # Converge every repo and pool in config, plus those present locally but no
+    # longer in config (desired 0 → drain the host of them, idle-guarded +
+    # cap-guarded).
+    targets = convergence_targets(
+        desired, pools, {r: [p.name for p in d] for r, d in live.items()}
+    )
     # A bare (installed-but-unregistered) dir carries no owner/repo of its own, so
     # it can only be claimed by directory name — safe only when the short name maps
     # to a single configured repo. Ambiguous short names skip the bare-dir sweep.
-    short_counts = Counter(r.split("/")[-1] for r in all_repos)
+    short_counts = Counter(r.split("/")[-1] for r in {t[0] for t in targets})
+    gh_by_repo: dict = {}  # one runner listing per repo, shared by its pools
     failed = 0
 
     # Hung-listener sweep state, accumulated across the per-repo loop below and
@@ -1101,27 +1155,31 @@ def main() -> int:
     hung_now: set[str] = set()
     evaluated_dirs: set[str] = set()
 
-    for repo in all_repos:
-        D = desired.get(repo, 0)
+    for repo, pool, D, local_dirs in targets:
         repo_name = repo.split("/")[-1]
-        D, clamped = clamp_to_slots(repo_name, D, ci_slots, gated)
+        tag = repo if pool is None else f"{repo} pool {pool}"
+        # Label-only pools are never clamped: they take no CI slot.
+        clamped = False
+        if pool is None:
+            D, clamped = clamp_to_slots(repo_name, D, ci_slots, gated)
         if clamped:
             show_header()
             print(
-                f"[{repo}] CLAMPED {desired[repo]}→{D} to ci_slots={ci_slots} "
+                f"[{tag}] CLAMPED {desired[repo]}→{D} to ci_slots={ci_slots} "
                 f"(never run more slot-gated runners than CI slots — fix runners.toml)"
             )
-        local_dirs = [p.name for p in live.get(repo, [])]
         if short_counts[repo_name] == 1:
             known = set(local_dirs)
             local_dirs += [
-                n for n in discover_installed_dirs(repo_name) if n not in known
+                n for n in discover_installed_dirs(repo_name, pool) if n not in known
             ]
-        gh = fetch_gh_runners(repo, host, repo_name)
+        if repo not in gh_by_repo:
+            gh_by_repo[repo] = fetch_gh_runners(repo, host, repo_name)
+        gh = pool_runners(gh_by_repo[repo], host, repo_name, pool)
 
         if gh is None:
             show_header()
-            print(f"[{repo}] gh unavailable — skipping convergence (needs tokens)")
+            print(f"[{tag}] gh unavailable — skipping convergence (needs tokens)")
             continue
 
         if health_enabled:
@@ -1162,7 +1220,13 @@ def main() -> int:
                 continue
             new_text = upsert_env(
                 env_path.read_text(),
-                runner_env_updates(dn, ci_slots, e2e_workers, repo_name in gated),
+                runner_env_updates(
+                    dn,
+                    ci_slots,
+                    e2e_workers,
+                    pool is None and repo_name in gated,
+                    pool=pool is not None,
+                ),
             )
             if new_text is not None:
                 env_work.append((dn, new_text))
@@ -1181,7 +1245,7 @@ def main() -> int:
         # runners.toml after its runners were registered. Skipped under
         # --dry-run, which must not mutate anything.
         labels_added = 0
-        if not args.dry_run:
+        if not args.dry_run and pool is None:
             labels_added = converge_labels(repo, gh, extra_labels)
 
         acted = (
@@ -1197,43 +1261,43 @@ def main() -> int:
 
         if not acted and not plan.capped:
             if args.dry_run:
-                print(f"[{repo}] in sync ({D} healthy registered)")
+                print(f"[{tag}] in sync ({D} healthy registered)")
             continue
 
         show_header()
 
         if plan.capped:
             print(
-                f"[{repo}] REFUSING removals: plan would remove more than {MAX_REMOVE} "
+                f"[{tag}] REFUSING removals: plan would remove more than {MAX_REMOVE} "
                 f"runners (likely a runners.toml mistake). Adds/re-register still run. "
                 f"Raise the cap or prune by hand if intentional."
             )
 
         for dn in plan.to_reregister:
-            print(f"[{repo}] re-register {dn}")
+            print(f"[{tag}] re-register {dn}")
         if plan.to_install:
-            print(f"[{repo}] install {plan.to_install} new → target {D}")
+            print(f"[{tag}] install {plan.to_install} new → target {D}")
         for dn in plan.to_remove:
-            print(f"[{repo}] remove (idle) {dn}")
+            print(f"[{tag}] remove (idle) {dn}")
         for dn in plan.deferred_busy:
-            print(f"[{repo}] remove {dn} (busy — deferring)")
+            print(f"[{tag}] remove {dn} (busy — deferring)")
         for dn in plan.to_cleanup:
-            print(f"[{repo}] cleanup dead {dn}")
+            print(f"[{tag}] cleanup dead {dn}")
         for dn, _ in env_work:
             state = "busy — deferring" if dn in busy_dirs else "restart"
-            print(f"[{repo}] converge .env in {dn} ({state})")
+            print(f"[{tag}] converge .env in {dn} ({state})")
         for dn, path, _ in svc_work:
             state = "busy — deferring" if dn in busy_dirs else "rewrite + restart"
-            print(f"[{repo}] converge {path.name} ({state})")
+            print(f"[{tag}] converge {path.name} ({state})")
 
         if args.dry_run:
             continue
 
         for dn in plan.to_reregister:
-            if not reregister(repo, dn, host, work_root, extra_labels):
+            if not reregister(repo, dn, host, work_root, extra_labels, pool):
                 failed += 1
         if plan.to_install and not install_runners(
-            repo, D, ci_slots, e2e_workers, work_root, extra_labels
+            repo, D, ci_slots, e2e_workers, work_root, extra_labels, pool
         ):
             failed += 1
         for dn in plan.to_remove:
