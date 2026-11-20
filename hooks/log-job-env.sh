@@ -67,6 +67,7 @@ pgrep -f 'update-host.sh' >/dev/null 2>&1 && UPDATE_HOST=true
 # Strip characters that would break a JSON string value (double-quote,
 # backslash, control chars). The free-text fields are host/uptime/GITHUB_* —
 # a workflow name can be arbitrary, so scrub before interpolating.
+# shellcheck disable=SC1003 # '"\\' is the set of characters to delete, not an escaped quote
 _j() { printf '%s' "$1" | tr -d '"\\' | tr -d '\000-\037'; }
 
 # One short line (< PIPE_BUF) appended with O_APPEND, so concurrent hooks don't

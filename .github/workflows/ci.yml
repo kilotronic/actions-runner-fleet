@@ -12,29 +12,50 @@ jobs:
   data-leak-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: kilotronic/data-leak-check@f1da8a7ce76bfaabd70ea815d9417fb691e95799 # v1.1.0
         with:
           denylist: ${{ secrets.DATA_LEAK_DENYLIST }}
 
+  # Shell scripts (shellcheck), workflows (actionlint), and actions and base images pinned by commit and
+  # digest, from kilotronic/lint. The job keeps its ShellCheck name: branch protection requires it.
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@2.0.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          scandir: "."
-          severity: warning
+          persist-credentials: false
+      - uses: kilotronic/lint@50d58c6fc3916432a60d6caf5914d5bb83a60a16 # v1.1.0
+
+  # Secrets in this event's commits: gitleaks (anything shaped like a secret) and trufflehog (keys that still
+  # work), from kilotronic/secret-scan.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: kilotronic/secret-scan@006556b813fd5054d7da8575d3928c5ad3583535 # v1.1.0
+
+  # Real authors on this event's commits, in the owner's domains, from kilotronic/git-identity.
+  git-identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: kilotronic/git-identity@76223f8d531904185d4bd46f66c65849cf0133f7 # v2.2.0
+        with:
+          domains: ixid.net, kilotronic.com
 
   python-tests:
     name: Python tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up venv
         run: |
           python3 -m venv .venv
@@ -48,7 +69,7 @@ jobs:
     name: Validate scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Check scripts are executable
         # Globbed, not listed. The list this replaced named 5 of the repo's 20
         # tracked scripts, so status.sh, reclaim-ci-disk.sh, exclude-ci-paths.sh,
@@ -82,3 +103,17 @@ jobs:
         run: ./test-ensure-orbstack.sh
       - name: Job-started hook sandbox
         run: ./test-job-started-hook.sh
+
+  # The one summary check: every job above must succeed.
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    needs: [data-leak-check, shellcheck, secret-scan, git-identity, python-tests, validate]
+    if: always()
+    steps:
+      - name: Verify required jobs succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do test "$r" = success; done

@@ -89,6 +89,7 @@ command -v systemctl &>/dev/null || die "systemd is required."
 [[ -f /etc/debian_version ]] || die "This script targets Debian/Ubuntu (apt-based)."
 
 # Detect distro family for Docker's apt repo (debian and ubuntu have separate repos).
+# shellcheck source=/dev/null # the host's file, read at install time
 DISTRO_ID="$(. /etc/os-release && echo "${ID}")"
 case "$DISTRO_ID" in
   debian) DOCKER_REPO_PATH="debian" ;;
@@ -145,6 +146,7 @@ if ! command -v docker &>/dev/null; then
   curl -fsSL https://download.docker.com/linux/debian/gpg \
     | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
   sudo chmod a+r /etc/apt/keyrings/docker.asc
+  # shellcheck source=/dev/null # the host's file, read at install time
   DEB_CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${DOCKER_REPO_PATH} ${DEB_CODENAME} stable" \
     | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
