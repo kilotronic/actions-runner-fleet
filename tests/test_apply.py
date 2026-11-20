@@ -175,6 +175,16 @@ class DecideTest(unittest.TestCase):
             p.to_cleanup, []
         )  # dead cleanup is a removal → also suppressed
 
+    def test_no_auto_prune_keeps_idle_excess_healthy_runners(self):
+        # want 1, have 2 idle healthy: without the marker app-2 would go; with it, nothing.
+        dirs = ["app-1", "app-2"]
+        self.assertEqual(
+            self.decide(1, dirs, [reg(d) for d in dirs]).to_remove, ["app-2"]
+        )
+        p = self.decide(1, dirs, [reg(d) for d in dirs], allow_remove=False)
+        self.assertEqual(p.to_remove, [])
+        self.assertFalse(p.capped)
+
     def test_surplus_dead_dirs_are_cleaned_up(self):
         # 2 healthy meet D=2; a 3rd dir is dead cruft → cleanup, no reregister.
         p = self.decide(
