@@ -9,7 +9,7 @@ authors = [{ name = "Kilotronic LLC" }]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff==0.16.1"]
+dev = ["pytest>=8.0", "ruff==0.17.5"]
 
 [project.urls]
 Homepage = "https://github.com/kilotronic/actions-runner-fleet"
