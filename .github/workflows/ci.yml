@@ -43,6 +43,9 @@ jobs:
   # Real authors on this event's commits, in the owner's domains, from kilotronic/git-identity.
   git-identity:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # allow-bots asks GitHub which pull request a commit came from
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -50,6 +53,7 @@ jobs:
       - uses: kilotronic/git-identity@5a7b91c3194870cf535ba8c37a6c93b19b5a933b # v2.3.1
         with:
           domains: ixid.net, kilotronic.com
+          allow-bots: dependabot
 
   python-tests:
     name: Python tests
