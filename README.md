@@ -12,7 +12,7 @@ scale-down, load shedding, and (optionally) OrbStack recovery across sleep.
 
 Inventory lives **outside** this repo:
 
-```
+```text
 $ACTIONS_RUNNER_CONFIG
 $XDG_CONFIG_HOME/actions-runner/runners.toml
 ~/.config/actions-runner/runners.toml
@@ -79,7 +79,7 @@ with a tailnet ACL.
 A host can chime when a job starts and ends. Put the files in a `sounds/`
 directory next to `runners.toml`:
 
-```
+```text
 ~/.config/actions-runner/sounds/job-start.aiff   # played when a job starts
 ~/.config/actions-runner/sounds/job-end.aiff     # played when a job ends
 ```
@@ -224,7 +224,7 @@ On Linux the job hooks hold a logind sleep inhibitor while a job runs, and for 1
 minutes after it, so an idle-suspend policy cannot suspend the machine mid-job
 or between jobs. If a job log shows
 
-```
+```text
 warning: sleep inhibitor was refused; this box may suspend mid-job
 warning: post-job sleep inhibitor was refused; this box may suspend between jobs
 ```
