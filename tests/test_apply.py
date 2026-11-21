@@ -41,9 +41,7 @@ class DecideTest(unittest.TestCase):
         return apply.decide(desired, local_dirs, gh_runners, host=HOST, **kw)
 
     def test_in_sync_is_noop(self):
-        p = self.decide(
-            2, ["app-1", "app-2"], [reg("app-1"), reg("app-2")]
-        )
+        p = self.decide(2, ["app-1", "app-2"], [reg("app-1"), reg("app-2")])
         self.assertEqual(p.to_reregister, [])
         self.assertEqual(p.to_install, 0)
         self.assertEqual(p.to_remove, [])
@@ -443,9 +441,7 @@ class DiscoverInstalledDirsTest(unittest.TestCase):
             (base / "notes-public-1").mkdir()
             (base / "notes-public-1" / "config.sh").touch()
             with mock.patch.object(apply, "RUNNER_BASE", base):
-                self.assertEqual(
-                    apply.discover_installed_dirs("notes"), ["notes-1"]
-                )
+                self.assertEqual(apply.discover_installed_dirs("notes"), ["notes-1"])
 
 
 class LoadDesiredTest(unittest.TestCase):
@@ -561,11 +557,15 @@ class RunnerEnvUpdatesTest(unittest.TestCase):
     """
 
     def test_tmpdir_is_converged_for_a_non_gated_repo(self):
-        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=None, gated=False)
+        updates = apply.runner_env_updates(
+            "app-1", ci_slots=2, e2e_workers=None, gated=False
+        )
         self.assertEqual(updates["TMPDIR"], str(apply.RUNNER_BASE / "app-1" / "_tmp"))
 
     def test_a_non_gated_repo_does_not_get_the_gated_budget_keys(self):
-        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=3, gated=False)
+        updates = apply.runner_env_updates(
+            "app-1", ci_slots=2, e2e_workers=3, gated=False
+        )
         self.assertNotIn("CI_SLOTS", updates)
         self.assertNotIn("E2E_WORKERS_OVERRIDE", updates)
 
@@ -575,13 +575,17 @@ class RunnerEnvUpdatesTest(unittest.TestCase):
         self.assertNotEqual(a["TMPDIR"], b["TMPDIR"])
 
     def test_a_gated_repo_keeps_its_budget_keys_alongside_tmpdir(self):
-        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=3, gated=True)
+        updates = apply.runner_env_updates(
+            "app-1", ci_slots=2, e2e_workers=3, gated=True
+        )
         self.assertEqual(updates["CI_SLOTS"], "2")
         self.assertEqual(updates["E2E_WORKERS_OVERRIDE"], "3")
         self.assertIn("TMPDIR", updates)
 
     def test_unset_e2e_workers_stays_unmanaged(self):
-        updates = apply.runner_env_updates("app-1", ci_slots=2, e2e_workers=None, gated=True)
+        updates = apply.runner_env_updates(
+            "app-1", ci_slots=2, e2e_workers=None, gated=True
+        )
         self.assertIsNone(updates["E2E_WORKERS_OVERRIDE"])
 
 
@@ -899,9 +903,7 @@ class HungDirsTest(unittest.TestCase):
         """The watchdog stops services on purpose — offline is the goal, not a
         fault. Restarting here would fight it every tick."""
         gh = [reg("app-1", status="offline")]
-        self.assertEqual(
-            self.hung(gh, ["app-1"], paused_dirs={"app-1"}), []
-        )
+        self.assertEqual(self.hung(gh, ["app-1"], paused_dirs={"app-1"}), [])
 
     def test_stopped_service_is_not_hung(self):
         """Nothing is running to be wedged; someone stopped it deliberately."""
@@ -968,9 +970,7 @@ class DebounceHungTest(unittest.TestCase):
     def test_recovered_runner_is_forgotten(self):
         """Evaluated and no longer hung → the clock resets, so a runner that
         flaps offline briefly never accumulates its way to a restart."""
-        act, seen = apply.debounce_hung(
-            9999.0, {"app-1": 1000.0}, set(), {"app-1"}
-        )
+        act, seen = apply.debounce_hung(9999.0, {"app-1": 1000.0}, set(), {"app-1"})
         self.assertEqual(act, [])
         self.assertEqual(seen, {})
 
@@ -1008,14 +1008,10 @@ class DebounceHungTest(unittest.TestCase):
         """A runner that cannot be revived bounces every grace period and says
         so in the log — it does not spin in a tight relaunch loop."""
         now = 1000.0 + self.GRACE
-        act, seen = apply.debounce_hung(
-            now, {"app-1": 1000.0}, {"app-1"}, {"app-1"}
-        )
+        act, seen = apply.debounce_hung(now, {"app-1": 1000.0}, {"app-1"}, {"app-1"})
         self.assertEqual(act, ["app-1"])
         # Next pass, one second later: still hung, but the clock restarted.
-        act2, seen2 = apply.debounce_hung(
-            now + 1, seen, {"app-1"}, {"app-1"}
-        )
+        act2, seen2 = apply.debounce_hung(now + 1, seen, {"app-1"}, {"app-1"})
         self.assertEqual(act2, [])
         self.assertEqual(seen2, {"app-1": now + 1})
 
@@ -1033,18 +1029,14 @@ class ApplyHungRestartsTest(unittest.TestCase):
     def test_idle_dir_is_restarted(self):
         with mock.patch.object(apply, "_svc_restart", return_value=True) as svc_restart:
             with contextlib.redirect_stdout(io.StringIO()):
-                failed = apply.apply_hung_restarts(
-                    ["app-1"], is_busy=lambda dn: False
-                )
+                failed = apply.apply_hung_restarts(["app-1"], is_busy=lambda dn: False)
         self.assertEqual(failed, 0)
         svc_restart.assert_called_once_with("app-1")
 
     def test_failed_restart_is_counted(self):
         with mock.patch.object(apply, "_svc_restart", return_value=False):
             with contextlib.redirect_stdout(io.StringIO()):
-                failed = apply.apply_hung_restarts(
-                    ["app-1"], is_busy=lambda dn: False
-                )
+                failed = apply.apply_hung_restarts(["app-1"], is_busy=lambda dn: False)
         self.assertEqual(failed, 1)
 
 
@@ -1082,9 +1074,7 @@ class HealthStateTest(unittest.TestCase):
                 '{"paused": ["app-1", "notes-1"]}'
             )
             with mock.patch.object(apply, "RUNNER_BASE", Path(tmpdir)):
-                self.assertEqual(
-                    apply.load_watchdog_paused(), {"app-1", "notes-1"}
-                )
+                self.assertEqual(apply.load_watchdog_paused(), {"app-1", "notes-1"})
 
     def test_both_watchdog_state_files_are_unioned(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1184,12 +1174,13 @@ class ConvergenceTargetsTest(unittest.TestCase):
 
     def test_pool_dirs_are_kept_out_of_the_main_pool_and_vice_versa(self):
         live = {"o/app": ["app-1", "app-2", "app-gate-1"]}
-        targets = apply.convergence_targets(
-            {"o/app": 2}, {"o/app": {"gate": 1}}, live
-        )
+        targets = apply.convergence_targets({"o/app": 2}, {"o/app": {"gate": 1}}, live)
         self.assertEqual(
             targets,
-            [("o/app", None, 2, ["app-1", "app-2"]), ("o/app", "gate", 1, ["app-gate-1"])],
+            [
+                ("o/app", None, 2, ["app-1", "app-2"]),
+                ("o/app", "gate", 1, ["app-gate-1"]),
+            ],
         )
 
     def test_a_pool_dropped_from_config_drains(self):
@@ -1275,9 +1266,7 @@ class PoolInstallTest(unittest.TestCase):
             mock.patch.object(apply.subprocess, "call", return_value=0) as call,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            apply.install_runners(
-                "o/app", 1, 4, 3, None, ("bigmem",), pool="gate"
-            )
+            apply.install_runners("o/app", 1, 4, 3, None, ("bigmem",), pool="gate")
         env = call.call_args.kwargs["env"]
         self.assertEqual(env["POOL_LABEL"], "gate")
         for key in ("CI_SLOTS", "E2E_WORKERS_OVERRIDE", "EXTRA_LABELS"):
@@ -1307,7 +1296,11 @@ class PoolReregisterTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 apply.reregister(
-                    "o/app", "app-gate-1", "host-a", extra_labels=("bigmem",), pool="gate"
+                    "o/app",
+                    "app-gate-1",
+                    "host-a",
+                    extra_labels=("bigmem",),
+                    pool="gate",
                 )
             argv = run_cmd.call_args[0][0]
         self.assertIn("--no-default-labels", argv)

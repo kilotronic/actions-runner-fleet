@@ -49,7 +49,9 @@ _REPO_RE = r"^[^/]+/[^/]+$"
 _POOL_LABEL_RE = r"^[A-Za-z][A-Za-z0-9_.-]*$"
 # The runner's own default labels. A pool carrying one would take the very
 # `runs-on: self-hosted` jobs it registers with --no-default-labels to avoid.
-_DEFAULT_LABELS = frozenset({"self-hosted", "linux", "macos", "windows", "x64", "arm", "arm64"})
+_DEFAULT_LABELS = frozenset(
+    {"self-hosted", "linux", "macos", "windows", "x64", "arm", "arm64"}
+)
 
 
 def resolve_config_path(*, explicit=None, env=None, home=None) -> Path:
@@ -172,7 +174,9 @@ def load_host(config_path: Path, host: str) -> HostConfig:
     )
 
 
-def _parse_pools(raw, host: str, repo_counts: dict, hosts: dict) -> dict[str, dict[str, int]]:
+def _parse_pools(
+    raw, host: str, repo_counts: dict, hosts: dict
+) -> dict[str, dict[str, int]]:
     """{owner/repo: {label: count}} from a host's `pools` table.
 
     A pool's runners live in <repo_name>-<label>-<n>, so its label must start
@@ -185,7 +189,9 @@ def _parse_pools(raw, host: str, repo_counts: dict, hosts: dict) -> dict[str, di
         return {}
     where = f"pools for host '{host}'"
     if not isinstance(raw, dict):
-        raise SystemExit(f"error: {where} must be a table of owner/repo tables, got {raw!r}")
+        raise SystemExit(
+            f"error: {where} must be a table of owner/repo tables, got {raw!r}"
+        )
     host_labels = {
         lbl.lower()
         for h in hosts.values()

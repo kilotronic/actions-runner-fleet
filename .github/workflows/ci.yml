@@ -108,7 +108,15 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [data-leak-check, shellcheck, secret-scan, git-identity, python-tests, validate]
+    needs:
+      [
+        data-leak-check,
+        shellcheck,
+        secret-scan,
+        git-identity,
+        python-tests,
+        validate,
+      ]
     if: always()
     steps:
       - name: Verify required jobs succeeded

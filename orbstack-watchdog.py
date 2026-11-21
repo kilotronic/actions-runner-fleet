@@ -79,7 +79,9 @@ def tick():
         print(f"error: {ENSURE} not found", file=sys.stderr)
         return 1
 
-    proc = subprocess.run([str(ENSURE), "--watchdog"], capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        [str(ENSURE), "--watchdog"], capture_output=True, text=True, check=False
+    )
     out = (proc.stdout or "") + (proc.stderr or "")
     lines = [ln for ln in out.splitlines() if ln.strip()]
 

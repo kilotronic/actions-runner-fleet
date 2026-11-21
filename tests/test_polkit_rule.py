@@ -308,7 +308,12 @@ def test_a_missing_rules_dir_is_created_when_polkit_is_present(
     dest = tmp_path / "polkit-1" / "rules.d" / "49-actions-runner-inhibit.rules"
     assert not dest.parent.exists()
     proc = run(
-        "--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log), POLKIT_PRESENT_CHECK="true"
+        "--user",
+        "ci",
+        dest=dest,
+        PATH=path,
+        SUDO_LOG=str(log),
+        POLKIT_PRESENT_CHECK="true",
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert dest.is_file()
@@ -327,7 +332,12 @@ def test_a_missing_rules_dir_without_polkit_is_refused(
     path, log = stub_sudo
     dest = tmp_path / "polkit-1" / "rules.d" / "49-actions-runner-inhibit.rules"
     proc = run(
-        "--user", "ci", dest=dest, PATH=path, SUDO_LOG=str(log), POLKIT_PRESENT_CHECK="false"
+        "--user",
+        "ci",
+        dest=dest,
+        PATH=path,
+        SUDO_LOG=str(log),
+        POLKIT_PRESENT_CHECK="false",
     )
     assert proc.returncode == 1
     assert "polkit is not installed" in proc.stderr

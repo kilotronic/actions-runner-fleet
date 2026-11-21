@@ -85,9 +85,12 @@ def upsert_env(text: str, updates: dict) -> str | None:
     return "\n".join(lines) + "\n"
 
 
-
 def runner_env_updates(
-    dirname: str, ci_slots: int, e2e_workers: int | None, gated: bool, pool: bool = False
+    dirname: str,
+    ci_slots: int,
+    e2e_workers: int | None,
+    gated: bool,
+    pool: bool = False,
 ) -> dict:
     """The .env keys apply.py converges into one runner. Pure.
 
@@ -117,11 +120,19 @@ def runner_env_updates(
         )
     return updates
 
+
 # ── Pure convergence core (no I/O — unit-tested in test_apply.py) ─────────────
 
 Plan = namedtuple(
     "Plan",
-    ["to_reregister", "to_install", "to_remove", "to_cleanup", "capped", "deferred_busy"],
+    [
+        "to_reregister",
+        "to_install",
+        "to_remove",
+        "to_cleanup",
+        "capped",
+        "deferred_busy",
+    ],
     defaults=((),),
 )
 
@@ -804,7 +815,13 @@ def install_runners(
     # ...), and an inherited value would be baked into a runner meant to leave
     # it unmanaged. (Caught 2026-07-16: a second repo's fresh .env inherited
     # E2E_WORKERS_OVERRIDE=3 from the installing host's ambient env.)
-    managed = ("CI_SLOTS", "E2E_WORKERS_OVERRIDE", "EXTRA_LABELS", "POOL_LABEL", "WORK_ROOT")
+    managed = (
+        "CI_SLOTS",
+        "E2E_WORKERS_OVERRIDE",
+        "EXTRA_LABELS",
+        "POOL_LABEL",
+        "WORK_ROOT",
+    )
     if pool is not None:
         exports = {"POOL_LABEL": pool}
     else:

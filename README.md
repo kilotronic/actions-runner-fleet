@@ -102,25 +102,25 @@ before it plays.
 
 ## Tools
 
-| Tool                              | What it does                                                                  |
-| --------------------------------- | ----------------------------------------------------------------------------- |
-| `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove), then restart hung listeners |
-| `load-watchdog.py`                | Pause idle listeners when per-core load is high; resume when it drops         |
+| Tool                              | What it does                                                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `apply.py`                        | Converge local runners to the TOML (add / re-register / idle-guarded remove), then restart hung listeners             |
+| `load-watchdog.py`                | Pause idle listeners when per-core load is high; resume when it drops                                                 |
 | `lid-watchdog.py`                 | Pause idle listeners on a laptop whose lid is closed, or that has been on battery for 30 min (macOS; no-op elsewhere) |
-| `maintenance-timer.py`            | Every 2h and after each job: `update-host.sh`, so hosts self-heal             |
-| `runner_timers.py`                | Shared launchd / systemd `--user` installer                                   |
-| `orbstack-watchdog.py`            | Installed only when `container_runtime = "orbstack"`                          |
-| `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off   |
-| `hooks/ensure-orbstack.sh`        | Four-state OrbStack recovery (healthy / down / slow / wedged)                 |
-| `install.sh` / `install-linux.sh` | Register runners, install load / lid / maintenance timers                     |
-| `status.sh`                       | Report runners, container runtime and (if present) a CI database container    |
-| `runner-status.30s.py`            | SwiftBar menu bar plugin showing live fleet status (macOS)                    |
-| `install-menubar.sh`              | Install the SwiftBar plugin above                                             |
-| `install-polkit-rule.sh`          | Opt-in: let the runner user hold logind sleep inhibitors (Linux)             |
-| `exclude-ci-paths.sh`             | Keep Time Machine / Backblaze / Photos off the CI work trees; report the rest (macOS) |
-| `exclude-spotlight.sh`            | Report what Spotlight still indexes under the CI trees; the exclusion itself is GUI-only (macOS) |
-| `reclaim-ci-disk.sh`              | Thin Time Machine local snapshots when a CI host runs low on disk (macOS)     |
-| `prune.sh`                        | Reclaim runner disk: stale `_diag` logs and idle `_work/_temp` (dry-run by default) |
+| `maintenance-timer.py`            | Every 2h and after each job: `update-host.sh`, so hosts self-heal                                                     |
+| `runner_timers.py`                | Shared launchd / systemd `--user` installer                                                                           |
+| `orbstack-watchdog.py`            | Installed only when `container_runtime = "orbstack"`                                                                  |
+| `ollama_serve.py`                 | Opt-in: publish local ollama to the tailnet; tear down when the flag is off                                           |
+| `hooks/ensure-orbstack.sh`        | Four-state OrbStack recovery (healthy / down / slow / wedged)                                                         |
+| `install.sh` / `install-linux.sh` | Register runners, install load / lid / maintenance timers                                                             |
+| `status.sh`                       | Report runners, container runtime and (if present) a CI database container                                            |
+| `runner-status.30s.py`            | SwiftBar menu bar plugin showing live fleet status (macOS)                                                            |
+| `install-menubar.sh`              | Install the SwiftBar plugin above                                                                                     |
+| `install-polkit-rule.sh`          | Opt-in: let the runner user hold logind sleep inhibitors (Linux)                                                      |
+| `exclude-ci-paths.sh`             | Keep Time Machine / Backblaze / Photos off the CI work trees; report the rest (macOS)                                 |
+| `exclude-spotlight.sh`            | Report what Spotlight still indexes under the CI trees; the exclusion itself is GUI-only (macOS)                      |
+| `reclaim-ci-disk.sh`              | Thin Time Machine local snapshots when a CI host runs low on disk (macOS)                                             |
+| `prune.sh`                        | Reclaim runner disk: stale `_diag` logs and idle `_work/_temp` (dry-run by default)                                   |
 
 OrbStack ensure is a **host** concern: the job-started hook runs before GitHub
 sets up `jobs.<name>.container`, and the watchdog runs when no job is queued.
@@ -268,7 +268,7 @@ inhibitor is granted while you look. Read a job log for
 
 ## Hung listeners
 
-Every restart mechanism here keys off process *exit*: the launchd plist's
+Every restart mechanism here keys off process _exit_: the launchd plist's
 `KeepAlive`/`SuccessfulExit`, and the systemd unit's `Restart=`. A listener that
 **hangs instead of exiting** therefore defeats all of them. This is not
 hypothetical — a runner took a job, lost its worker, and sat with that job still
@@ -281,7 +281,7 @@ half its configured capacity for a week and a half.
 holds no `Runner.Worker`**. Four guards keep it from bouncing anything healthy —
 a busy runner is working (an offline status against a live worker is a
 GitHub-side blip); a runner the load or lid watchdog paused is offline on
-purpose; a stopped service is somebody's deliberate act; and an *unregistered*
+purpose; a stopped service is somebody's deliberate act; and an _unregistered_
 dir is `decide()`'s re-register case, not this one.
 
 Detection is debounced on **elapsed time**, not on a count of passes: a runner

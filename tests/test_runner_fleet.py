@@ -124,9 +124,7 @@ class DiscoverRunnersTest(unittest.TestCase):
             write_runner_file(base / "app-2", "https://github.com/o/app")
             write_runner_file(base / "app-1", "https://github.com/o/app")
             runners = runner_fleet.discover_runners(base_dir=base)
-            self.assertEqual(
-                [r.dir.name for r in runners], ["app-1", "app-2"]
-            )
+            self.assertEqual([r.dir.name for r in runners], ["app-1", "app-2"])
 
     def test_default_base_dir_is_home_actions_runner(self):
         self.assertEqual(runner_fleet.RUNNER_BASE, Path.home() / "actions-runner")

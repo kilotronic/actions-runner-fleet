@@ -115,7 +115,7 @@ def test_the_plist_is_only_ever_read() -> None:
     touching = [
         ln
         for ln in code.splitlines()
-        if "PLIST" in ln and not re.match(r'^\s*PLIST=', ln.strip())
+        if "PLIST" in ln and not re.match(r"^\s*PLIST=", ln.strip())
     ]
     assert touching, "expected the read to still exist"
     for ln in touching:
@@ -139,7 +139,13 @@ def test_it_never_reloads_or_erases_the_index() -> None:
     which `_code()` excludes — running one is what is forbidden.
     """
     code = _code()
-    for forbidden in ("kickstart", "mdutil -i off", "mdutil -i on", "mdutil -E", "mdutil -X"):
+    for forbidden in (
+        "kickstart",
+        "mdutil -i off",
+        "mdutil -i on",
+        "mdutil -E",
+        "mdutil -X",
+    ):
         assert forbidden not in code, forbidden
     assert "launchctl" not in code
 
@@ -243,9 +249,7 @@ def test_it_is_not_wired_into_any_timer_or_installer() -> None:
         path = REPO / name
         if not path.exists():
             continue
-        code = "\n".join(
-            ln.split("#", 1)[0] for ln in path.read_text().splitlines()
-        )
+        code = "\n".join(ln.split("#", 1)[0] for ln in path.read_text().splitlines())
         assert "exclude-spotlight.sh" not in code, name
     for tmpl in (REPO / "templates").rglob("*"):
         if tmpl.is_file():
@@ -322,7 +326,7 @@ def _stubs(tmp_path: Path, counts: dict[str, int]) -> str:
     binp = tmp_path / "bin"
     binp.mkdir(exist_ok=True)
     cases = "\n".join(
-        f'  {path!r}) echo {n} ;;'.replace("'", '"') for path, n in counts.items()
+        f"  {path!r}) echo {n} ;;".replace("'", '"') for path, n in counts.items()
     )
     (binp / "mdfind").write_text(
         "#!/usr/bin/env bash\n"
