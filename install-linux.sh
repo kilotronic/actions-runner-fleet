@@ -141,8 +141,10 @@ if ! command -v uv &>/dev/null && [[ ! -x "$HOME/.local/bin/uv" ]]; then
   info "Installing uv ${UV_VERSION}..."
   UV_INSTALLER="$(mktemp)"
   curl -fsSL -o "$UV_INSTALLER" "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-installer.sh"
-  echo "${UV_INSTALLER_SHA256}  ${UV_INSTALLER}" | sha256sum -c --quiet - \
-    || die "uv installer checksum mismatch"
+  if ! echo "${UV_INSTALLER_SHA256}  ${UV_INSTALLER}" | sha256sum -c --quiet -; then
+    rm -f "$UV_INSTALLER"
+    die "uv installer checksum mismatch"
+  fi
   sh "$UV_INSTALLER"
   rm -f "$UV_INSTALLER"
 fi
