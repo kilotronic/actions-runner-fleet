@@ -133,10 +133,18 @@ if ! command -v gh &>/dev/null; then
   sudo apt-get install -y -qq gh
 fi
 
-# uv (single-user install, official installer)
+# uv (single-user install, official installer). The installer is pinned to a release and its checksum checked
+# before it runs; it then checks the uv archive it downloads. Later updates come from `uv self update`.
+UV_VERSION="0.13.9"
+UV_INSTALLER_SHA256="ccc888115ac831bd9c30855c1d4abeae32fce679701d2aac8e72eb0beffb41c2"
 if ! command -v uv &>/dev/null && [[ ! -x "$HOME/.local/bin/uv" ]]; then
-  info "Installing uv..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  info "Installing uv ${UV_VERSION}..."
+  UV_INSTALLER="$(mktemp)"
+  curl -fsSL -o "$UV_INSTALLER" "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-installer.sh"
+  echo "${UV_INSTALLER_SHA256}  ${UV_INSTALLER}" | sha256sum -c --quiet - \
+    || die "uv installer checksum mismatch"
+  sh "$UV_INSTALLER"
+  rm -f "$UV_INSTALLER"
 fi
 
 # Docker Engine (official Docker apt repo)

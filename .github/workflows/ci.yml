@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   # Refuse the organisation's private terms (the DATA_LEAK_DENYLIST secret) in this event's commits:
   # added lines, file paths, commit messages and authors.
@@ -28,7 +31,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/lint@50d58c6fc3916432a60d6caf5914d5bb83a60a16 # v1.1.0
+      - uses: kilotronic/lint@57c42f430af9a89607e32d1947714e2e594db6f3 # v1.2.0
 
   # Secrets in this event's commits: gitleaks (anything shaped like a secret) and trufflehog (keys that still
   # work), from kilotronic/secret-scan.
@@ -50,10 +53,24 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/git-identity@5a7b91c3194870cf535ba8c37a6c93b19b5a933b # v2.3.1
+      - uses: kilotronic/git-identity@b0d54e809d81cabf61d357cbe519a9b9263b17cb # v2.4.0
         with:
           domains: ixid.net, kilotronic.com
           allow-bots: dependabot
+          commit-subject: true
+
+  # The format and lint bundle from .pre-commit-config.yaml (formatters, ruff, markdownlint, yamllint, ...),
+  # the same hooks a commit runs. The identity, secret and private-term hooks run as their own jobs above.
+  prek:
+    name: Format and lint (prek)
+    runs-on: ubuntu-latest
+    env:
+      SKIP: git-identity,commit-subject,session-trailer,secret-scan,secret-scan-push,data-leak-check,data-leak-check-commit-msg,data-leak-check-pre-push
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: pipx run prek==0.5.11 run --all-files --show-diff-on-failure
 
   python-tests:
     name: Python tests
@@ -118,6 +135,7 @@ jobs:
         shellcheck,
         secret-scan,
         git-identity,
+        prek,
         python-tests,
         validate,
       ]
