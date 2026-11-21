@@ -9,7 +9,8 @@ authors = [{ name = "Kilotronic LLC" }]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff==0.16.1"]
+# ruff is not a dev dependency: it runs from the shared lint hooks (prek), at one pinned version.
+dev = ["pytest>=8.0"]
 
 [project.urls]
 Homepage = "https://github.com/kilotronic/actions-runner-fleet"
