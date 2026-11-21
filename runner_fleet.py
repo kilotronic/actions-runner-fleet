@@ -137,7 +137,9 @@ def worker_cmdlines():
     exists per active job). One shared `ps` scan feeds is_busy() for every
     runner, so a caller checking many runners still shells out once.
     """
-    r = subprocess.run(["ps", "-A", "-o", "command="], capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        ["ps", "-A", "-o", "command="], capture_output=True, text=True, check=False
+    )
     return [ln for ln in r.stdout.splitlines() if "Runner.Worker" in ln]
 
 

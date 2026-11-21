@@ -62,7 +62,9 @@ class TestFsReport:
         assert "LOW" not in out
 
     def test_a_tmpfs_is_named_as_ram_backed(self, tmp_path):
-        out = _run(tmp_path, "tmp /x 1 85", avail_kb=5 * 1048576, used_pct=20, fstype="tmpfs")
+        out = _run(
+            tmp_path, "tmp /x 1 85", avail_kb=5 * 1048576, used_pct=20, fstype="tmpfs"
+        )
         assert "RAM-backed" in out
 
     def test_a_disk_filesystem_is_not_called_ram_backed(self, tmp_path):
@@ -98,7 +100,7 @@ class TestInstallersBakeTmpdir:
     def test_installer_derives_tmpdir_from_the_runner_dir(self, installer):
         # Must be the runner's own _tmp, matching apply.py's runner_env_updates.
         text = (REPO / installer).read_text()
-        assert 'TMPDIR=$RUNNER_DIR/_tmp' in text or 'TMPDIR=${RUNNER_DIR}/_tmp' in text
+        assert "TMPDIR=$RUNNER_DIR/_tmp" in text or "TMPDIR=${RUNNER_DIR}/_tmp" in text
 
     def test_apply_and_installer_agree_on_the_path_shape(self):
         """apply.py's computed path must end in the same <dir>/_tmp the installers write."""

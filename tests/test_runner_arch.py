@@ -142,7 +142,9 @@ def test_installer_registers_with_the_hosts_extra_labels(installer):
     does, or it misses label-routed jobs until a later pass adds them."""
     text = (REPO / installer).read_text()
     assert 'CONFIG_FLAGS+=(--labels "$EXTRA_LABELS")' in text
-    assert re.search(r'--unattended \\\n\s*\$\{CONFIG_FLAGS\[@\]\+"\$\{CONFIG_FLAGS\[@\]\}"\}', text)
+    assert re.search(
+        r'--unattended \\\n\s*\$\{CONFIG_FLAGS\[@\]\+"\$\{CONFIG_FLAGS\[@\]\}"\}', text
+    )
 
 
 @pytest.mark.parametrize("installer", INSTALLERS)

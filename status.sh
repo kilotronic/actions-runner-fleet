@@ -190,7 +190,8 @@ fs_report tmp "$_tmp" "${CI_TMP_MIN_FREE_GIB:-1}" "${CI_TMP_MAX_USED_PCT:-85}"
 # Service-file drift. The installers skip an already-configured runner, so a
 # unit or plist from an older kit is never rewritten by them; apply.py converges
 # it, but a host that has not converged yet looks identical to a healthy one.
-_drift="$(python3 - "$SCRIPT_DIR" <<'PY' 2>/dev/null || true
+_drift="$(
+  python3 - "$SCRIPT_DIR" <<'PY' 2>/dev/null || true
 import importlib.util, sys
 from pathlib import Path
 spec = importlib.util.spec_from_file_location("apply", Path(sys.argv[1]) / "apply.py")

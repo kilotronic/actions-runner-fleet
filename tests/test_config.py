@@ -134,7 +134,7 @@ def test_a_pool_only_repo_needs_no_main_count(tmp_path):
 @pytest.mark.parametrize(
     "pools_toml,match",
     [
-        ('pools = 3\n', "pools"),
+        ("pools = 3\n", "pools"),
         ('[hosts.box.pools]\n"acme/app" = 1\n', "pools"),
         ('[hosts.box.pools."app"]\ngate = 1\n', "owner/repo"),
         ('[hosts.box.pools."acme/app"]\ngate = -1\n', "non-negative"),

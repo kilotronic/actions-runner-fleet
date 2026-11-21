@@ -42,7 +42,9 @@ GH_CACHE_TTL = 300  # seconds
 
 def run(cmd, timeout=5):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        r = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False
+        )
         return r.stdout.strip(), r.returncode
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return "", 1
