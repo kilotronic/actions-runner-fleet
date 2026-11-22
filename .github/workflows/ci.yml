@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/checks/data-leak-check@a6e8917fddb679077a2e8a427598ff1fd7a160ef # v1.0.0
+      - uses: kilotronic/checks/data-leak-check@1bc3a9cd7c8875e77799faae6774f6f8eec50207 # v1.0.1
         with:
           denylist: ${{ secrets.DATA_LEAK_DENYLIST }}
 
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/checks/lint@a6e8917fddb679077a2e8a427598ff1fd7a160ef # v1.0.0
+      - uses: kilotronic/checks/lint@1bc3a9cd7c8875e77799faae6774f6f8eec50207 # v1.0.1
 
   # Secrets in this event's commits: gitleaks (anything shaped like a secret) and trufflehog (keys that still
   # work), from kilotronic/checks/secret-scan.
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/checks/secret-scan@a6e8917fddb679077a2e8a427598ff1fd7a160ef # v1.0.0
+      - uses: kilotronic/checks/secret-scan@1bc3a9cd7c8875e77799faae6774f6f8eec50207 # v1.0.1
 
   # Real authors on this event's commits, in the owner's domains, from kilotronic/checks/git-identity.
   git-identity:
@@ -53,10 +53,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/checks/git-identity@a6e8917fddb679077a2e8a427598ff1fd7a160ef # v1.0.0
+      - uses: kilotronic/checks/git-identity@1bc3a9cd7c8875e77799faae6774f6f8eec50207 # v1.0.1
         with:
           domains: ixid.net, kilotronic.com
-          allow-bots: dependabot
           commit-subject: true
 
   # The format and lint bundle from .pre-commit-config.yaml (formatters, ruff, markdownlint, yamllint, ...),
