@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/lint@b5343bfa69d890919c8774733da372d13d23d6d3 # v1.3.1
+      - uses: kilotronic/lint@56a43d45e7b4479bba97c79404a4dc7671bd9796 # v1.3.2
 
   # Secrets in this event's commits: gitleaks (anything shaped like a secret) and trufflehog (keys that still
   # work), from kilotronic/secret-scan.
