@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: kilotronic/lint@57c42f430af9a89607e32d1947714e2e594db6f3 # v1.2.0
+      - uses: kilotronic/lint@56a43d45e7b4479bba97c79404a4dc7671bd9796 # v1.3.2
 
   # Secrets in this event's commits: gitleaks (anything shaped like a secret) and trufflehog (keys that still
   # work), from kilotronic/secret-scan.
@@ -80,9 +80,7 @@ jobs:
       - name: Set up venv
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install --quiet pytest 'ruff==0.16.1'
-      - name: Run ruff
-        run: .venv/bin/ruff check .
+          .venv/bin/pip install --quiet pytest
       - name: Run pytest
         run: .venv/bin/pytest tests/ -q
 
