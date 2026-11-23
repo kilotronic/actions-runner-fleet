@@ -97,7 +97,7 @@ def test_installer_installs_the_maintenance_job_the_hook_triggers(installer):
 def test_first_job_on_a_fresh_install_is_clean(tmp_path):
     """Nothing but a fresh hook sync: no runners.toml, no sounds, no .repo-path,
     and none of the optional tools (systemd-inhibit, launchctl, systemctl, afplay,
-    pw-play, standup) on PATH. Both real hooks, with their real sidecars, must run
+    pw-play) on PATH. Both real hooks, with their real sidecars, must run
     to completion under the shell options the runner uses, and say nothing on
     stderr — an install that works has nothing to warn about."""
     home = tmp_path / "home"
@@ -137,3 +137,9 @@ def test_first_job_on_a_fresh_install_is_clean(tmp_path):
         )
         assert r.returncode == 0, f"{hook} failed on a fresh host: {r.stderr}"
         assert r.stderr == "", f"{hook} warned on a fresh host: {r.stderr}"
+
+
+def test_no_job_posts_to_the_retired_standup_board():
+    """The standup board is retired: the Actions page shows which runner is on which job."""
+    assert not (HOOKS / "standup-presence.sh").exists()
+    assert "standup" not in (HOOKS / "_sidecars.sh").read_text()
