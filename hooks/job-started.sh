@@ -4,8 +4,8 @@
 #
 # Three host concerns, none of which a workflow step can handle:
 #
-# 1. Run the paired sidecars before the job starts — environment sampling,
-#    board presence, and an optional chime (see hooks/_sidecars.sh).
+# 1. Run the paired sidecars before the job starts — environment sampling
+#    and an optional chime (see hooks/_sidecars.sh).
 # 2. Hold a sleep inhibitor for the lifetime of the job, so an idle-suspend
 #    policy cannot suspend the box mid-job (see below).
 # 3. If this host opts into OrbStack via runners.toml
