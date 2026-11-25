@@ -155,6 +155,11 @@ Disable auto-update with `touch ~/actions-runner/.no-auto-update`. Disable
 destructive removals with `touch ~/actions-runner/.no-auto-prune`. Disable the
 hung-listener sweep with `touch ~/actions-runner/.no-runner-health`.
 
+Keep each host's checkout on `main`. `update-host.sh` only fast-forwards the
+branch the checkout is on, and it exits quietly, skipping convergence too, when
+that branch has no upstream or cannot fast-forward. A host left on a merged
+feature branch stops updating without an error.
+
 ## Removing runners
 
 To retire a repo's runners on a host, set its count to `0` in `runners.toml` (or
