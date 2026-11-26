@@ -11,3 +11,8 @@ uv.lock
 .pytest_cache/
 .ruff_cache/
 .serena/
+
+# Secrets: never commit local environment files
+.env
+.env.*
+!.env.example
