@@ -308,6 +308,17 @@ rejected: a listener rotates to a fresh `_diag/Runner_*.log` on every restart
 rather than health — and the wedged listener above still logged sporadically
 across its ten days.
 
+## Accepted risks
+
+- **Hosts run whatever lands on `main`.** Every host fast-forwards to `main` on
+  each maintenance tick (every 2 hours and after each job) and runs it with the
+  runner's GitHub sign-in, Docker and network access. `main` requires a pull
+  request and passing checks, with no bypass, but a merged change reaches every
+  host with no person in between, including a merge by an agent. Accepted by
+  Jason Luther on 2026-11-26 instead of hosts running only release tags he cuts
+  by hand. Reopen if `main` gains a bypass, someone other than Jason and his
+  agents can merge to it, or the hosts start holding production secrets.
+
 ## License
 
 MIT — Kilotronic LLC
