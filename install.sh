@@ -76,7 +76,8 @@ fi
 check_cmd brew
 
 # Install missing brew packages (idempotent — skips already-installed)
-BREW_DEPS=(gh python@3.13)
+# zstd: actions/cache restores only entries packed the way this host packs them.
+BREW_DEPS=(gh python@3.13 zstd)
 MISSING=()
 for pkg in "${BREW_DEPS[@]}"; do
   brew list --formula "$pkg" &>/dev/null || MISSING+=("$pkg")

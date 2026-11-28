@@ -136,7 +136,7 @@ GitHub CLI `gh` — installed and authenticated before the installer runs, since
 it registers runners through `gh`.
 
 - **macOS:** Homebrew, then `brew install gh`. The installer brew-installs
-  Python if it is missing.
+  Python and zstd if they are missing.
 - **Debian/Ubuntu:** a fresh machine has neither `git` nor `gh`, so start with
   `sudo apt-get install -y git gh`. The installer installs Docker, Python and
   everything else it needs.

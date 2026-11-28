@@ -106,6 +106,7 @@ sudo apt-get update -qq
 APT_DEPS=(
   curl ca-certificates gnupg lsb-release
   git jq
+  zstd # actions/cache restores only entries packed the way this host packs them
   python3 python3-pip python3-venv
 )
 
